@@ -10,7 +10,7 @@ const SCRAPINGBEE_API_KEY = "W7GE7DBLEZDE7Q1YAEPTZ52ESK19934P1FKJMFO4091XZTBIKVA
 
 app.get("/api/comps", async (req, res) => {
   try {
-    const cityUrl = "https://www.redfin.com/city/30749/NY/New-York/filter/include=sold-3mo"; // ← You can change city later
+    const cityUrl = "https://www.redfin.com/city/30749/NY/New-York/filter/include=sold-3mo";
     const scraperUrl = `https://app.scrapingbee.com/api/v1?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(cityUrl)}&render_js=true`;
 
     console.log("🔍 Scraping Redfin sold listings for New York...");
