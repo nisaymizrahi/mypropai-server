@@ -9,19 +9,11 @@ app.use(cors({ origin: "*" }));
 const SCRAPINGBEE_API_KEY = "W7GE7DBLEZDE7Q1YAEPTZ52ESK19934P1FKJMFO4091XZTBIKVA1J74ZLRCWOELEE5GJCFBH2SGN6MGQ";
 
 app.get("/api/comps", async (req, res) => {
-  const { lat, lng, distance = 1 } = req.query;
-
-  if (!lat || !lng) {
-    return res.status(400).json({ error: "Missing lat or lng" });
-  }
-
   try {
-    // Build Redfin map-based sold listings URL
-    const targetUrl = `https://www.redfin.com/map?lat=${lat}&long=${lng}&status=3&uipt=1,2,3&market=ny`;
+    const cityUrl = "https://www.redfin.com/city/30749/NY/New-York/filter/include=sold-3mo"; // ← You can change city later
+    const scraperUrl = `https://app.scrapingbee.com/api/v1?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(cityUrl)}&render_js=true`;
 
-    const scraperUrl = `https://app.scrapingbee.com/api/v1?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(targetUrl)}&render_js=true`;
-
-    console.log("🔍 Scraping Redfin via ScrapingBee:", targetUrl);
+    console.log("🔍 Scraping Redfin sold listings for New York...");
 
     const response = await axios.get(scraperUrl, {
       timeout: 15000,
@@ -32,6 +24,7 @@ app.get("/api/comps", async (req, res) => {
 
     const $ = cheerio.load(response.data);
     const cards = $("div.HomeCardContainer");
+
     console.log("📄 Found", cards.length, "Redfin home cards");
 
     const comps = [];
@@ -39,9 +32,10 @@ app.get("/api/comps", async (req, res) => {
     cards.each((i, el) => {
       const address = $(el).find("div.addressDisplay").text()?.trim() || "Unknown";
       const priceText = $(el).find("span.homecardV2Price").text()?.trim() || "0";
-      const beds = $(el).find("div.stats").text().match(/(\d+)\s+Beds?/i)?.[1] || "0";
-      const baths = $(el).find("div.stats").text().match(/(\d+)\s+Baths?/i)?.[1] || "0";
-      const sqft = $(el).find("div.stats").text().match(/([\d,]+)\s+Sq Ft/i)?.[1]?.replace(/,/g, "") || "0";
+      const statsText = $(el).find("div.stats").text();
+      const beds = statsText.match(/(\d+)\s+Beds?/i)?.[1] || "0";
+      const baths = statsText.match(/(\d+)\s+Baths?/i)?.[1] || "0";
+      const sqft = statsText.match(/([\d,]+)\s+Sq Ft/i)?.[1]?.replace(/,/g, "") || "0";
 
       comps.push({
         id: `redfin-comp-${i}`,
@@ -53,7 +47,7 @@ app.get("/api/comps", async (req, res) => {
       });
     });
 
-    console.log(`✅ Found ${comps.length} comps for lat=${lat}, lng=${lng}`);
+    console.log(`✅ Found ${comps.length} comps`);
     res.json(comps);
   } catch (error) {
     console.error("❌ Scraping error:", error.message);
