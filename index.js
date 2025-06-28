@@ -15,12 +15,17 @@ app.get("/api/comps", async (req, res) => {
 
   try {
     const url = `https://www.realtor.com/realestateandhomes-search/geo/${lat},${lng}/sold/pg-1?radius=${distance}`;
-    const response = await axios.get(url);
+    console.log("🔍 Scraping URL:", url);
+
+    const response = await axios.get(url, { timeout: 8000 });
     const $ = cheerio.load(response.data);
+
+    const results = $("li[data-testid='result-card']");
+    console.log("📄 Found", results.length, "'result-card' items");
 
     const comps = [];
 
-    $("li[data-testid='result-card']").each((i, el) => {
+    results.each((i, el) => {
       const address = $(el).find("[data-label='pc-address']").text().trim();
       const priceText = $(el).find("[data-label='pc-price']").text().trim();
       const beds = $(el).find("[data-label='pc-meta-beds']").text().trim();
