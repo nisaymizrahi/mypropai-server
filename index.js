@@ -23,6 +23,8 @@ app.get("/api/comps", async (req, res) => {
     });
 
     const $ = cheerio.load(response.data);
+    console.log("🧾 Full HTML Preview:", response.data.slice(0, 5000));
+
     const reduxScript = $("#__REDUX_STATE__").html();
 
     if (!reduxScript) {
