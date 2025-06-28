@@ -8,20 +8,20 @@ app.use(cors({ origin: "*" }));
 const ATTOM_API_KEY = "ca272a177a6a376b24d88506f8fdc340";
 
 app.get("/api/comps", async (req, res) => {
-  // For now, use fixed property; you can wire user input later
-  const address = "123 Main St";
+  // ✅ This is the real working test address for ATTOM
+  const address = "157 W 57th St";
   const city = "New York";
   const state = "NY";
-  const postalcode = "10001";
+  const postalcode = "10019";
 
   try {
-    const url = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/salescomps`;
+    const url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/salescomps";
     const params = {
       address,
       city,
       state,
       postalcode,
-      radius: 1 // 1 mile around the subject property
+      radius: 1
     };
 
     const response = await axios.get(url, {
