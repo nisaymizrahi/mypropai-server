@@ -4,7 +4,9 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: '*'
+}));
 
 app.get("/api/comps", async (req, res) => {
   const { lat, lng, distance = 1 } = req.query;
