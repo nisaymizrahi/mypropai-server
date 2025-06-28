@@ -8,8 +8,7 @@ app.use(cors({ origin: "*" }));
 const ATTOM_API_KEY = "ca272a177a6a376b24d88506f8fdc340";
 
 app.get("/api/comps", async (req, res) => {
-  // ✅ This is the real working test address for ATTOM
-  const address = "157 W 57th St";
+  // 🧪 Try broader search with city + zip
   const city = "New York";
   const state = "NY";
   const postalcode = "10019";
@@ -17,7 +16,6 @@ app.get("/api/comps", async (req, res) => {
   try {
     const url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/salescomps";
     const params = {
-      address,
       city,
       state,
       postalcode,
