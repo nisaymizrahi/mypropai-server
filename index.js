@@ -22,22 +22,23 @@ app.get("/api/comps", async (req, res) => {
 
     const results = $("li[data-testid='result-card']");
     console.log("📄 Found", results.length, "'result-card' items");
+    console.log("🧾 HTML sample:", $.html().slice(0, 1000));
 
     const comps = [];
 
     results.each((i, el) => {
-      const address = $(el).find("[data-label='pc-address']").text().trim();
-      const priceText = $(el).find("[data-label='pc-price']").text().trim();
-      const beds = $(el).find("[data-label='pc-meta-beds']").text().trim();
-      const baths = $(el).find("[data-label='pc-meta-baths']").text().trim();
-      const sqft = $(el).find("[data-label='pc-meta-sqft']").text().trim();
+      const address = $(el).find("[data-label='pc-address']").text()?.trim() || "Unknown";
+      const priceText = $(el).find("[data-label='pc-price']").text()?.trim() || "0";
+      const beds = $(el).find("[data-label='pc-meta-beds']").text()?.trim() || "0";
+      const baths = $(el).find("[data-label='pc-meta-baths']").text()?.trim() || "0";
+      const sqft = $(el).find("[data-label='pc-meta-sqft']").text()?.trim() || "0";
 
       comps.push({
         id: `server-comp-${i}`,
         address,
         price: parseInt(priceText.replace(/[^\d]/g, "") || "0"),
         beds: parseInt(beds.replace(/[^\d]/g, "") || "0"),
-        baths: parseInt(baths.replace(/[^\d]/g, "") || "0"),
+        baths: parseFloat(baths.replace(/[^\d.]/g, "") || "0"),
         sqft: parseInt(sqft.replace(/[^\d]/g, "") || "0"),
       });
     });
