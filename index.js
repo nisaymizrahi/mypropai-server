@@ -21,9 +21,14 @@ app.get("/api/comps", async (req, res) => {
 
     console.log("🔍 Scraping via ScrapingBee:", targetUrl);
 
-    const response = await axios.get(scraperUrl, { timeout: 10000 });
-    const $ = cheerio.load(response.data);
+    const response = await axios.get(scraperUrl, {
+      timeout: 12000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+      }
+    });
 
+    const $ = cheerio.load(response.data);
     const results = $("li[data-testid='result-card']");
     console.log("📄 Found", results.length, "'result-card' items");
 
