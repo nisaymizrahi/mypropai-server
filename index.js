@@ -1,3 +1,4 @@
+// ✅ Final index.js for ATTOM + Filters
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
@@ -8,7 +9,19 @@ app.use(cors());
 const API_KEY = process.env.ATTOM_API_KEY;
 
 app.get("/api/comps", async (req, res) => {
-  const { lat, lng, distance = 1, propertyType } = req.query;
+  const {
+    lat,
+    lng,
+    distance = 1,
+    propertyType,
+    bedsMin,
+    bedsMax,
+    bathsMin,
+    bathsMax,
+    sqftMin,
+    sqftMax
+  } = req.query;
+
   if (!lat || !lng) return res.status(400).json({ error: "Missing lat or lng" });
 
   try {
@@ -21,17 +34,27 @@ app.get("/api/comps", async (req, res) => {
     });
 
     const comps = (response.data.property || []).filter((p) => {
-      if (!p.building) return false;
-      if (!propertyType) return true;
+      const b = p.building || {};
+      const s = p.structure || {};
 
-      const attomType = p.building.type?.raw || "";
-      const normalized = attomType.toUpperCase();
+      const bedCount = s.roomsTotal || 0;
+      const bathCount = s.totalBathroomCount || 0;
+      const sqft = b.sizeInterior || 0;
+      const type = b.type?.raw?.toUpperCase() || "";
 
-      // Basic matching logic
-      if (propertyType === "SFR") return normalized.includes("SINGLE") || normalized.includes("SFR");
-      if (propertyType === "CONDO") return normalized.includes("CONDO");
-      if (propertyType === "APT") return normalized.includes("APT") || normalized.includes("APARTMENT");
-      if (propertyType === "MULTI") return normalized.includes("MULTI");
+      // Type filter
+      if (propertyType === "SFR" && !type.includes("SINGLE") && !type.includes("SFR")) return false;
+      if (propertyType === "CONDO" && !type.includes("CONDO")) return false;
+      if (propertyType === "APT" && !type.includes("APT") && !type.includes("APARTMENT")) return false;
+      if (propertyType === "MULTI" && !type.includes("MULTI")) return false;
+
+      // Range filters
+      if (bedsMin && bedCount < parseInt(bedsMin)) return false;
+      if (bedsMax && bedCount > parseInt(bedsMax)) return false;
+      if (bathsMin && bathCount < parseFloat(bathsMin)) return false;
+      if (bathsMax && bathCount > parseFloat(bathsMax)) return false;
+      if (sqftMin && sqft < parseInt(sqftMin)) return false;
+      if (sqftMax && sqft > parseInt(sqftMax)) return false;
 
       return true;
     }).map((p, i) => ({
@@ -42,7 +65,7 @@ app.get("/api/comps", async (req, res) => {
       baths: p.structure?.totalBathroomCount || 0,
       sqft: p.building?.sizeInterior ?? 0,
       lat: p.location?.latitude,
-      lng: p.location?.longitude,
+      lng: p.location?.longitude
     }));
 
     console.log(`✅ ATTOM returned ${comps.length} comps`);
@@ -54,4 +77,4 @@ app.get("/api/comps", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`✅ Server listening on port ${PORT}`));
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
