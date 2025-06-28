@@ -16,10 +16,10 @@ app.get("/api/comps", async (req, res) => {
   }
 
   try {
-  const targetUrl = `https://www.realtor.com/realestateandhomes-search/geo/${lat},${lng}/sold/pg-1?radius=${distance}`;
-const scraperUrl = `https://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}`;
+    const targetUrl = `https://www.realtor.com/realestateandhomes-search/geo/${lat},${lng}/sold/pg-1?radius=${distance}`;
+    const scraperUrl = `https://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&render=true&url=${encodeURIComponent(targetUrl)}`;
 
-    console.log("🔍 Scraping via ScraperAPI:", targetUrl);
+    console.log("🔍 Scraping via ScraperAPI (with render):", targetUrl);
 
     const response = await axios.get(scraperUrl, { timeout: 10000 });
     const $ = cheerio.load(response.data);
