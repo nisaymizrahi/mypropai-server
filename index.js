@@ -22,6 +22,9 @@ app.get("/api/comps", async (req, res) => {
       }
     });
 
+    // 📄 Log a short preview of the HTML
+    console.log("🧾 HTML Preview:", response.data.slice(0, 1000));
+
     const $ = cheerio.load(response.data);
     const cards = $("div.HomeCardContainer");
 
