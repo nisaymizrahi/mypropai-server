@@ -6,6 +6,8 @@ const cheerio = require("cheerio");
 const app = express();
 app.use(cors({ origin: "*" }));
 
+const SCRAPER_API_KEY = "YOUR_SCRAPERAPI_KEY_HERE"; // <-- Replace this
+
 app.get("/api/comps", async (req, res) => {
   const { lat, lng, distance = 1 } = req.query;
 
@@ -14,15 +16,16 @@ app.get("/api/comps", async (req, res) => {
   }
 
   try {
-    const url = `https://www.realtor.com/realestateandhomes-search/geo/${lat},${lng}/sold/pg-1?radius=${distance}`;
-    console.log("🔍 Scraping URL:", url);
+    const targetUrl = `https://www.realtor.com/realestateandhomes-search/geo/${lat},${lng}/sold/pg-1?radius=${distance}`;
+    const scraperUrl = `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}`;
 
-    const response = await axios.get(url, { timeout: 8000 });
+    console.log("🔍 Scraping via ScraperAPI:", targetUrl);
+
+    const response = await axios.get(scraperUrl, { timeout: 10000 });
     const $ = cheerio.load(response.data);
 
     const results = $("li[data-testid='result-card']");
     console.log("📄 Found", results.length, "'result-card' items");
-    console.log("🧾 HTML sample:", $.html().slice(0, 1000));
 
     const comps = [];
 
