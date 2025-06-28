@@ -5,34 +5,47 @@ const axios = require("axios");
 const app = express();
 app.use(cors());
 
-const RENTCAST_KEY = "49acb72212604bbf8db0b4b9951e4e3d"; // ✅ Your working API key
+const ATTOM_API_KEY = "ca272a177a6a376b24d88506f8fdc340"; // ✅ your working key
 
 app.get("/api/comps", async (req, res) => {
-  const { lat, lng, distance = 1 } = req.query;
-  if (!lat || !lng) return res.status(400).json({ error: "Missing lat or lng" });
+  // 🧪 Replace this with user input later
+  const address = "157 W 57th St";
+  const postalcode = "10019";
+  const radius = 1;
 
   try {
-    const url = `https://api.rentcast.io/v1/properties/sale-comps?latitude=${lat}&longitude=${lng}&radius=${distance}`;
+    const url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/salescomps/v2";
+    const params = {
+      address,
+      postalcode,
+      radius
+    };
+
     const response = await axios.get(url, {
-      headers: { "X-Api-Key": RENTCAST_KEY } // ✅ Correct header casing
+      headers: {
+        apikey: ATTOM_API_KEY,
+        accept: "application/json"
+      },
+      params
     });
 
     const comps = (response.data?.comps || []).map((comp, i) => ({
-      id: comp.id ?? `rc-${i}`,
-      address: comp.address || "Unknown",
-      price: comp.price ?? 0,
-      beds: comp.beds ?? 0,
-      baths: comp.baths ?? 0,
-      sqft: comp.sqft ?? 0,
-      lat: comp.latitude ?? lat,
-      lng: comp.longitude ?? lng,
+      id: comp.identifier?.obPropId || `attom-${i}`,
+      address: comp.property?.address?.line1 || "Unknown",
+      price: comp.sale?.amount || 0,
+      beds: comp.building?.rooms?.beds || 0,
+      baths: comp.building?.rooms?.baths || 0,
+      sqft: comp.building?.size?.livingsize || 0,
+      yearBuilt: comp.building?.yearbuilt || null,
+      lat: comp.location?.latitude,
+      lng: comp.location?.longitude,
       color: "#FF0000"
     }));
 
-    console.log(`✅ RentCast returned ${comps.length} comps`);
+    console.log(`✅ ATTOM returned ${comps.length} comps`);
     res.json(comps);
-  } catch (err) {
-    console.error("❌ RENTCAST error:", err.response?.status, err.response?.data || err.message);
+  } catch (error) {
+    console.error("❌ ATTOM error:", error.response?.status, error.response?.data || error.message);
     res.status(500).json({ error: "Failed to fetch comps" });
   }
 });
