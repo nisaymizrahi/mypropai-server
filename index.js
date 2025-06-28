@@ -3,52 +3,39 @@ const cors = require("cors");
 const axios = require("axios");
 
 const app = express();
-app.use(cors({ origin: "*" }));
+app.use(cors());
 
-const ATTOM_API_KEY = "ca272a177a6a376b24d88506f8fdc340";
+const RENTCAST_KEY = "49acb72212604bbf8db0b4b9951e4e3d"; // your key
 
 app.get("/api/comps", async (req, res) => {
-  // 🧪 Try broader search with city + zip
-  const city = "New York";
-  const state = "NY";
-  const postalcode = "10019";
+  const { lat, lng, distance = 1 } = req.query;
+  if (!lat || !lng) return res.status(400).json({ error: "Missing lat or lng" });
 
   try {
-    const url = "https://api.gateway.attomdata.com/propertyapi/v1.0.0/salescomps";
-    const params = {
-      city,
-      state,
-      postalcode,
-      radius: 1
-    };
-
+    const url = `https://api.rentcast.io/v1/properties/sale-comps?latitude=${lat}&longitude=${lng}&radius=${distance}`;
     const response = await axios.get(url, {
-      headers: {
-        apikey: ATTOM_API_KEY,
-        accept: "application/json"
-      },
-      params
+      headers: { "x-api-key": RENTCAST_KEY }
     });
 
-    const comps = (response.data?.property || []).map((prop, i) => ({
-      id: prop.apn || `attom-${i}`,
-      address: prop.address?.line1 || "Unknown",
-      price: prop.sale?.amount || 0,
-      beds: prop.building?.rooms?.beds || 0,
-      baths: prop.building?.rooms?.baths || 0,
-      sqft: prop.building?.size?.livingsize || 0,
-      yearBuilt: prop.building?.yearbuilt || null
+    const comps = (response.data?.comps || []).map((comp, i) => ({
+      id: comp.id ?? `rc-${i}`,
+      address: comp.address || "Unknown",
+      price: comp.price ?? 0,
+      beds: comp.beds ?? 0,
+      baths: comp.baths ?? 0,
+      sqft: comp.sqft ?? 0,
+      lat: comp.latitude ?? lat,
+      lng: comp.longitude ?? lng,
+      color: "#FF0000"
     }));
 
-    console.log(`✅ Retrieved ${comps.length} comps from ATTOM`);
+    console.log(`✅ RentCast returned ${comps.length} comps`);
     res.json(comps);
-  } catch (error) {
-    console.error("❌ ATTOM API error:", error.message);
+  } catch (err) {
+    console.error("❌ RENTCAST error:", err.response?.status, err.message);
     res.status(500).json({ error: "Failed to fetch comps" });
   }
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`✅ Server running at http://localhost:${PORT}`);
-});
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
