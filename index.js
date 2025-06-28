@@ -16,38 +16,40 @@ app.get("/api/comps", async (req, res) => {
   }
 
   try {
-    const targetUrl = `https://www.realtor.com/realestateandhomes-search/geo/${lat},${lng}/sold/pg-1?radius=${distance}`;
+    // Build Redfin map-based sold listings URL
+    const targetUrl = `https://www.redfin.com/map?lat=${lat}&long=${lng}&status=3&uipt=1,2,3&market=ny`;
+
     const scraperUrl = `https://app.scrapingbee.com/api/v1?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(targetUrl)}&render_js=true`;
 
-    console.log("🔍 Scraping via ScrapingBee:", targetUrl);
+    console.log("🔍 Scraping Redfin via ScrapingBee:", targetUrl);
 
     const response = await axios.get(scraperUrl, {
-      timeout: 12000,
+      timeout: 15000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
       }
     });
 
     const $ = cheerio.load(response.data);
-    const results = $("li[data-testid='result-card']");
-    console.log("📄 Found", results.length, "'result-card' items");
+    const cards = $("div.HomeCardContainer");
+    console.log("📄 Found", cards.length, "Redfin home cards");
 
     const comps = [];
 
-    results.each((i, el) => {
-      const address = $(el).find("[data-label='pc-address']").text()?.trim() || "Unknown";
-      const priceText = $(el).find("[data-label='pc-price']").text()?.trim() || "0";
-      const beds = $(el).find("[data-label='pc-meta-beds']").text()?.trim() || "0";
-      const baths = $(el).find("[data-label='pc-meta-baths']").text()?.trim() || "0";
-      const sqft = $(el).find("[data-label='pc-meta-sqft']").text()?.trim() || "0";
+    cards.each((i, el) => {
+      const address = $(el).find("div.addressDisplay").text()?.trim() || "Unknown";
+      const priceText = $(el).find("span.homecardV2Price").text()?.trim() || "0";
+      const beds = $(el).find("div.stats").text().match(/(\d+)\s+Beds?/i)?.[1] || "0";
+      const baths = $(el).find("div.stats").text().match(/(\d+)\s+Baths?/i)?.[1] || "0";
+      const sqft = $(el).find("div.stats").text().match(/([\d,]+)\s+Sq Ft/i)?.[1]?.replace(/,/g, "") || "0";
 
       comps.push({
-        id: `server-comp-${i}`,
+        id: `redfin-comp-${i}`,
         address,
         price: parseInt(priceText.replace(/[^\d]/g, "") || "0"),
-        beds: parseInt(beds.replace(/[^\d]/g, "") || "0"),
-        baths: parseFloat(baths.replace(/[^\d.]/g, "") || "0"),
-        sqft: parseInt(sqft.replace(/[^\d]/g, "") || "0"),
+        beds: parseInt(beds),
+        baths: parseFloat(baths),
+        sqft: parseInt(sqft),
       });
     });
 
