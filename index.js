@@ -11,18 +11,20 @@ const SCRAPINGBEE_API_KEY = "W7GE7DBLEZDE7Q1YAEPTZ52ESK19934P1FKJMFO4091XZTBIKVA
 app.get("/api/comps", async (req, res) => {
   try {
     const cityUrl = "https://www.redfin.com/city/30749/NY/New-York/filter/include=sold-3mo";
-    const scraperUrl = `https://app.scrapingbee.com/api/v1?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(cityUrl)}&render_js=true`;
+    const scraperUrl = `https://app.scrapingbee.com/api/v1?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(cityUrl)}&render_js=true&wait_for=3000`;
 
     console.log("🔍 Scraping Redfin with ScrapingBee...");
 
     const response = await axios.get(scraperUrl, {
-      timeout: 20000,
+      timeout: 30000, // increased timeout
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
       }
     });
 
     const $ = cheerio.load(response.data);
+
+    // 🔍 Log the top portion of HTML for inspection
     console.log("🧾 Full HTML Preview:", response.data.slice(0, 5000));
 
     const reduxScript = $("#__REDUX_STATE__").html();
