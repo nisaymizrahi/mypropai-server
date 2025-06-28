@@ -36,6 +36,7 @@ app.get("/api/comps", async (req, res) => {
         sqft: parseInt(sqft.replace(/[^\d]/g, "") || "0"),
       });
     });
+
     console.log(`✅ Found ${comps.length} comps for lat=${lat}, lng=${lng}`);
     res.json(comps);
   } catch (error) {
@@ -44,7 +45,7 @@ app.get("/api/comps", async (req, res) => {
   }
 });
 
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`✅ Server running at http://localhost:${PORT}`);
 });
