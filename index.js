@@ -5,7 +5,7 @@ const axios = require("axios");
 const app = express();
 app.use(cors());
 
-const RENTCAST_KEY = "49acb72212604bbf8db0b4b9951e4e3d"; // your key
+const RENTCAST_KEY = "49acb72212604bbf8db0b4b9951e4e3d"; // ✅ Your working API key
 
 app.get("/api/comps", async (req, res) => {
   const { lat, lng, distance = 1 } = req.query;
@@ -14,7 +14,7 @@ app.get("/api/comps", async (req, res) => {
   try {
     const url = `https://api.rentcast.io/v1/properties/sale-comps?latitude=${lat}&longitude=${lng}&radius=${distance}`;
     const response = await axios.get(url, {
-      headers: { "x-api-key": RENTCAST_KEY }
+      headers: { "X-Api-Key": RENTCAST_KEY } // ✅ Correct header casing
     });
 
     const comps = (response.data?.comps || []).map((comp, i) => ({
@@ -32,7 +32,7 @@ app.get("/api/comps", async (req, res) => {
     console.log(`✅ RentCast returned ${comps.length} comps`);
     res.json(comps);
   } catch (err) {
-    console.error("❌ RENTCAST error:", err.response?.status, err.message);
+    console.error("❌ RENTCAST error:", err.response?.status, err.response?.data || err.message);
     res.status(500).json({ error: "Failed to fetch comps" });
   }
 });

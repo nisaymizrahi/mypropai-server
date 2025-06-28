@@ -1,7 +1,6 @@
 {
   "name": "mypropai-server",
   "version": "1.0.0",
-  "description": "Backend server for MyPropAI",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -14,8 +13,5 @@
   },
   "engines": {
     "node": ">=14"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "MIT"
+  }
 }
