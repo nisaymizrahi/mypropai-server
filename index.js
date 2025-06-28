@@ -4,9 +4,7 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 const app = express();
-app.use(cors({
-  origin: '*'
-}));
+app.use(cors({ origin: "*" }));
 
 app.get("/api/comps", async (req, res) => {
   const { lat, lng, distance = 1 } = req.query;
@@ -42,12 +40,11 @@ app.get("/api/comps", async (req, res) => {
     console.log(`✅ Found ${comps.length} comps for lat=${lat}, lng=${lng}`);
     res.json(comps);
   } catch (error) {
-    console.error("Scraping error:", error.message);
+    console.error("❌ Scraping error:", error.message);
     res.status(500).json({ error: "Scraping failed" });
   }
 });
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`✅ Server running at http://localhost:${PORT}`);
-});
+  console.log(`✅ Server running a
