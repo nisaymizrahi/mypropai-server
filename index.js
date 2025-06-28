@@ -6,7 +6,7 @@ const cheerio = require("cheerio");
 const app = express();
 app.use(cors({ origin: "*" }));
 
-const SCRAPER_API_KEY = "fed9cb307647eefcb3b94c6118b561fa";
+const SCRAPINGBEE_API_KEY = "W7GE7DBLEZDE7Q1YAEPTZ52ESK19934P1FKJMFO4091XZTBIKVA1J74ZLRCWOELEE5GJCFBH2SGN6MGQ";
 
 app.get("/api/comps", async (req, res) => {
   const { lat, lng, distance = 1 } = req.query;
@@ -17,9 +17,9 @@ app.get("/api/comps", async (req, res) => {
 
   try {
     const targetUrl = `https://www.realtor.com/realestateandhomes-search/geo/${lat},${lng}/sold/pg-1?radius=${distance}`;
-    const scraperUrl = `https://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&render=true&url=${encodeURIComponent(targetUrl)}`;
+    const scraperUrl = `https://app.scrapingbee.com/api/v1?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(targetUrl)}&render_js=true`;
 
-    console.log("🔍 Scraping via ScraperAPI (with render):", targetUrl);
+    console.log("🔍 Scraping via ScrapingBee:", targetUrl);
 
     const response = await axios.get(scraperUrl, { timeout: 10000 });
     const $ = cheerio.load(response.data);
