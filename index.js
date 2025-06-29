@@ -1,4 +1,4 @@
-// ✅ Final index.js for ATTOM + Filters
+// ✅ NEW index.js using ATTOM Sales History
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
@@ -13,7 +13,6 @@ app.get("/api/comps", async (req, res) => {
     lat,
     lng,
     distance = 1,
-    propertyType,
     bedsMin,
     bedsMax,
     bathsMin,
@@ -25,53 +24,63 @@ app.get("/api/comps", async (req, res) => {
   if (!lat || !lng) return res.status(400).json({ error: "Missing lat or lng" });
 
   try {
-    const url = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/snapshot?latitude=${lat}&longitude=${lng}&radius=${distance}`;
-    const response = await axios.get(url, {
+    // Step 1: Get property list by lat/lng
+    const geoUrl = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/snapshot?latitude=${lat}&longitude=${lng}&radius=${distance}`;
+    const geoRes = await axios.get(geoUrl, {
       headers: {
         accept: "application/json",
         apikey: API_KEY
       }
     });
 
-    const comps = (response.data.property || []).filter((p) => {
-      const b = p.building || {};
-      const s = p.structure || {};
+    const properties = geoRes.data.property || [];
+    const attomIds = properties.map(p => p.identifier.attomId).slice(0, 20); // limit for now
 
-      const bedCount = s.roomsTotal || 0;
-      const bathCount = s.totalBathroomCount || 0;
-      const sqft = b.sizeInterior || 0;
-      const type = b.type?.raw?.toUpperCase() || "";
+    // Step 2: Fetch sales history for each attomId
+    const results = [];
 
-      // Type filter
-      if (propertyType === "SFR" && !type.includes("SINGLE") && !type.includes("SFR")) return false;
-      if (propertyType === "CONDO" && !type.includes("CONDO")) return false;
-      if (propertyType === "APT" && !type.includes("APT") && !type.includes("APARTMENT")) return false;
-      if (propertyType === "MULTI" && !type.includes("MULTI")) return false;
+    for (const id of attomIds) {
+      const detailUrl = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/saleshistory/detail?id=${id}`;
+      const detailRes = await axios.get(detailUrl, {
+        headers: {
+          accept: "application/json",
+          apikey: API_KEY
+        }
+      });
 
-      // Range filters
-      if (bedsMin && bedCount < parseInt(bedsMin)) return false;
-      if (bedsMax && bedCount > parseInt(bedsMax)) return false;
-      if (bathsMin && bathCount < parseFloat(bathsMin)) return false;
-      if (bathsMax && bathCount > parseFloat(bathsMax)) return false;
-      if (sqftMin && sqft < parseInt(sqftMin)) return false;
-      if (sqftMax && sqft > parseInt(sqftMax)) return false;
+      const record = detailRes.data.saleshistory?.[0];
+      const prop = detailRes.data.property?.[0];
 
-      return true;
-    }).map((p, i) => ({
-      id: p.identifier.attomId,
-      address: p.address.oneLine,
-      price: p.sales && p.sales.length ? p.sales[0].saleAmount : 0,
-      beds: p.structure?.roomsTotal || 0,
-      baths: p.structure?.totalBathroomCount || 0,
-      sqft: p.building?.sizeInterior ?? 0,
-      lat: p.location?.latitude,
-      lng: p.location?.longitude
-    }));
+      if (record && record.saleAmount > 0 && prop?.building?.size?.size?.value) {
+        const beds = prop.structure?.roomsTotal || 0;
+        const baths = prop.structure?.totalBathroomCount || 0;
+        const sqft = prop.building?.size?.size?.value || 0;
 
-    console.log(`✅ ATTOM returned ${comps.length} comps`);
-    res.json(comps);
+        // Apply filters
+        if (bedsMin && beds < parseInt(bedsMin)) continue;
+        if (bedsMax && beds > parseInt(bedsMax)) continue;
+        if (bathsMin && baths < parseFloat(bathsMin)) continue;
+        if (bathsMax && baths > parseFloat(bathsMax)) continue;
+        if (sqftMin && sqft < parseInt(sqftMin)) continue;
+        if (sqftMax && sqft > parseInt(sqftMax)) continue;
+
+        results.push({
+          id,
+          address: prop.address?.oneLine || "Unknown",
+          price: record.saleAmount,
+          beds,
+          baths,
+          sqft,
+          lat: prop.location?.latitude,
+          lng: prop.location?.longitude
+        });
+      }
+    }
+
+    console.log(`✅ Final comps returned: ${results.length}`);
+    res.json(results);
   } catch (e) {
-    console.error("❌ ATTOM API error:", e.response?.status, e.message);
+    console.error("❌ ATTOM fetch failed:", e.response?.status, e.message);
     res.status(500).json({ error: "Failed to fetch comps" });
   }
 });
