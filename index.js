@@ -1,4 +1,4 @@
-// ✅ Expanded version: fetch ALL comps from ATTOM sales history
+// index.js
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
@@ -6,90 +6,45 @@ const axios = require("axios");
 const app = express();
 app.use(cors());
 
-const API_KEY = process.env.ATTOM_API_KEY;
+const ATTOM_API_KEY = process.env.ATTOM_API_KEY || "ca272a177a6a376b24d88506f8fdc340";
 
 app.get("/api/comps", async (req, res) => {
-  const {
-    lat,
-    lng,
-    distance = 1,
-    bedsMin,
-    bedsMax,
-    bathsMin,
-    bathsMax,
-    sqftMin,
-    sqftMax
-  } = req.query;
+  const { street, city, county, state, zip } = req.query;
 
-  if (!lat || !lng) return res.status(400).json({ error: "Missing lat or lng" });
+  if (!street || !city || !state || !zip || !county) {
+    return res.status(400).json({ error: "Missing address parts" });
+  }
 
   try {
-    const geoUrl = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/snapshot?latitude=${lat}&longitude=${lng}&radius=${distance}`;
-    const geoRes = await axios.get(geoUrl, {
+    const url = `https://api.gateway.attomdata.com/property/v2/salescomparables/address/${encodeURIComponent(street)}/${encodeURIComponent(city)}/${encodeURIComponent(county)}/${state}/${zip}`;
+    
+    const response = await axios.get(url, {
       headers: {
         accept: "application/json",
-        apikey: API_KEY
+        apikey: ATTOM_API_KEY
       }
     });
 
-    const properties = geoRes.data.property || [];
-    console.log(`📦 Fetched ${properties.length} nearby properties`);
+    const comps = response.data?.property || [];
 
-    const results = [];
-    for (const p of properties) {
-      const id = p.identifier?.attomId;
-      if (!id) continue;
+    const formatted = comps.map((comp, i) => ({
+      id: comp.identifier?.Id || `attom-${i}`,
+      address: comp.address?.oneLine || "N/A",
+      price: comp.sale?.amount?.saleamt || 0,
+      beds: comp.building?.rooms?.beds || 0,
+      baths: comp.building?.rooms?.bathstotal || 0,
+      sqft: comp.building?.size?.universalsize || 0,
+      lat: comp.location?.latitude,
+      lng: comp.location?.longitude,
+    }));
 
-      try {
-        const detailUrl = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/saleshistory/detail?id=${id}`;
-        const detailRes = await axios.get(detailUrl, {
-          headers: {
-            accept: "application/json",
-            apikey: API_KEY
-          }
-        });
-
-        const record = detailRes.data.saleshistory?.[0];
-        const prop = detailRes.data.property?.[0];
-
-        if (!record || !prop) continue;
-        const salePrice = record.saleAmount || 0;
-        const sqft = prop.building?.size?.size?.value || 0;
-        const beds = prop.structure?.roomsTotal || 0;
-        const baths = prop.structure?.totalBathroomCount || 0;
-
-        // Filtering logic
-        if (salePrice <= 0 || sqft <= 0) continue;
-        if (bedsMin && beds < parseInt(bedsMin)) continue;
-        if (bedsMax && beds > parseInt(bedsMax)) continue;
-        if (bathsMin && baths < parseFloat(bathsMin)) continue;
-        if (bathsMax && baths > parseFloat(bathsMax)) continue;
-        if (sqftMin && sqft < parseInt(sqftMin)) continue;
-        if (sqftMax && sqft > parseInt(sqftMax)) continue;
-
-        results.push({
-          id,
-          address: prop.address?.oneLine || "Unknown",
-          price: salePrice,
-          beds,
-          baths,
-          sqft,
-          lat: prop.location?.latitude,
-          lng: prop.location?.longitude
-        });
-      } catch (err) {
-        console.warn(`⚠️ Skipped property ID ${id}:`, err.response?.status);
-        continue;
-      }
-    }
-
-    console.log(`✅ Final comps returned: ${results.length}`);
-    res.json(results);
-  } catch (e) {
-    console.error("❌ ATTOM fetch failed:", e.response?.status, e.message);
+    console.log(`✅ ATTOM comps found: ${formatted.length}`);
+    res.json(formatted);
+  } catch (error) {
+    console.error("❌ ATTOM API error:", error.response?.status, error.message);
     res.status(500).json({ error: "Failed to fetch comps" });
   }
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`✅ Server listening on port ${PORT}`));
