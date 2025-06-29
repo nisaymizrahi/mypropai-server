@@ -1,4 +1,4 @@
-// ✅ NEW index.js using ATTOM Sales History
+// ✅ Expanded version: fetch ALL comps from ATTOM sales history
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
@@ -24,7 +24,6 @@ app.get("/api/comps", async (req, res) => {
   if (!lat || !lng) return res.status(400).json({ error: "Missing lat or lng" });
 
   try {
-    // Step 1: Get property list by lat/lng
     const geoUrl = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/snapshot?latitude=${lat}&longitude=${lng}&radius=${distance}`;
     const geoRes = await axios.get(geoUrl, {
       headers: {
@@ -34,29 +33,33 @@ app.get("/api/comps", async (req, res) => {
     });
 
     const properties = geoRes.data.property || [];
-    const attomIds = properties.map(p => p.identifier.attomId).slice(0, 20); // limit for now
+    console.log(`📦 Fetched ${properties.length} nearby properties`);
 
-    // Step 2: Fetch sales history for each attomId
     const results = [];
+    for (const p of properties) {
+      const id = p.identifier?.attomId;
+      if (!id) continue;
 
-    for (const id of attomIds) {
-      const detailUrl = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/saleshistory/detail?id=${id}`;
-      const detailRes = await axios.get(detailUrl, {
-        headers: {
-          accept: "application/json",
-          apikey: API_KEY
-        }
-      });
+      try {
+        const detailUrl = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/saleshistory/detail?id=${id}`;
+        const detailRes = await axios.get(detailUrl, {
+          headers: {
+            accept: "application/json",
+            apikey: API_KEY
+          }
+        });
 
-      const record = detailRes.data.saleshistory?.[0];
-      const prop = detailRes.data.property?.[0];
+        const record = detailRes.data.saleshistory?.[0];
+        const prop = detailRes.data.property?.[0];
 
-      if (record && record.saleAmount > 0 && prop?.building?.size?.size?.value) {
+        if (!record || !prop) continue;
+        const salePrice = record.saleAmount || 0;
+        const sqft = prop.building?.size?.size?.value || 0;
         const beds = prop.structure?.roomsTotal || 0;
         const baths = prop.structure?.totalBathroomCount || 0;
-        const sqft = prop.building?.size?.size?.value || 0;
 
-        // Apply filters
+        // Filtering logic
+        if (salePrice <= 0 || sqft <= 0) continue;
         if (bedsMin && beds < parseInt(bedsMin)) continue;
         if (bedsMax && beds > parseInt(bedsMax)) continue;
         if (bathsMin && baths < parseFloat(bathsMin)) continue;
@@ -67,13 +70,16 @@ app.get("/api/comps", async (req, res) => {
         results.push({
           id,
           address: prop.address?.oneLine || "Unknown",
-          price: record.saleAmount,
+          price: salePrice,
           beds,
           baths,
           sqft,
           lat: prop.location?.latitude,
           lng: prop.location?.longitude
         });
+      } catch (err) {
+        console.warn(`⚠️ Skipped property ID ${id}:`, err.response?.status);
+        continue;
       }
     }
 
