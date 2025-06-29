@@ -1,4 +1,4 @@
-// index.js
+// index.js (mypropai-server)
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
@@ -6,42 +6,60 @@ const axios = require("axios");
 const app = express();
 app.use(cors());
 
-const ATTOM_API_KEY = process.env.ATTOM_API_KEY || "ca272a177a6a376b24d88506f8fdc340";
+const API_KEY = process.env.ATTOM_API_KEY;
 
 app.get("/api/comps", async (req, res) => {
-  const { street, city, county, state, zip } = req.query;
-
-  if (!street || !city || !state || !zip || !county) {
-    return res.status(400).json({ error: "Missing address parts" });
-  }
+  const { lat, lng, distance = 1 } = req.query;
+  if (!lat || !lng) return res.status(400).json({ error: "Missing lat or lng" });
 
   try {
-    const url = `https://api.gateway.attomdata.com/property/v2/salescomparables/address/${encodeURIComponent(street)}/${encodeURIComponent(city)}/${encodeURIComponent(county)}/${state}/${zip}`;
-    
+    // STEP 1: Get properties by lat/lng
+    const url = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/snapshot?latitude=${lat}&longitude=${lng}&radius=${distance}`;
     const response = await axios.get(url, {
       headers: {
         accept: "application/json",
-        apikey: ATTOM_API_KEY
+        apikey: API_KEY
       }
     });
 
-    const comps = response.data?.property || [];
+    const properties = response.data.property || [];
 
-    const formatted = comps.map((comp, i) => ({
-      id: comp.identifier?.Id || `attom-${i}`,
-      address: comp.address?.oneLine || "N/A",
-      price: comp.sale?.amount?.saleamt || 0,
-      beds: comp.building?.rooms?.beds || 0,
-      baths: comp.building?.rooms?.bathstotal || 0,
-      sqft: comp.building?.size?.universalsize || 0,
-      lat: comp.location?.latitude,
-      lng: comp.location?.longitude,
+    // STEP 2: For each property, get sale history
+    const results = await Promise.all(properties.map(async (p) => {
+      const attomId = p.identifier.attomId;
+
+      try {
+        const salesRes = await axios.get(
+          `https://api.gateway.attomdata.com/propertyapi/v1.0.0/saleshistory/snapshot?attomid=${attomId}`,
+          {
+            headers: {
+              accept: "application/json",
+              apikey: API_KEY
+            }
+          }
+        );
+
+        const saleData = salesRes.data.property?.[0]?.salehistory?.[0] || {};
+        return {
+          id: attomId,
+          address: p.address?.oneLine || "Unknown",
+          price: saleData.amount?.saleamt || 0,
+          beds: p.structure?.roomsTotal || 0,
+          baths: p.structure?.totalBathroomCount || 0,
+          sqft: p.building?.size?.universalsize || 0,
+          lat: p.location?.latitude,
+          lng: p.location?.longitude,
+        };
+      } catch (err) {
+        return null; // skip this property if saleshistory fails
+      }
     }));
 
-    console.log(`✅ ATTOM comps found: ${formatted.length}`);
-    res.json(formatted);
-  } catch (error) {
-    console.error("❌ ATTOM API error:", error.response?.status, error.message);
+    const filtered = results.filter(r => r !== null);
+    console.log(`✅ Returned ${filtered.length} enriched comps`);
+    res.json(filtered);
+  } catch (e) {
+    console.error("❌ ATTOM API error:", e.message);
     res.status(500).json({ error: "Failed to fetch comps" });
   }
 });
