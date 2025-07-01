@@ -7,9 +7,8 @@ app.use(cors());
 
 const API_KEY = process.env.ATTOM_API_KEY;
 
-// Haversine distance in miles
 const haversineDistance = (lat1, lon1, lat2, lon2) => {
-  const R = 3958.8; // miles
+  const R = 3958.8;
   const toRad = (deg) => (deg * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
@@ -32,10 +31,14 @@ const fetchPropertyDetails = async (attomId) => {
     return {
       beds: p?.building?.rooms?.beds ?? 0,
       baths: p?.building?.rooms?.bathstotal ?? 0,
+      lotSize: p?.lot?.lotsize2 ?? 0,
+      yearBuilt: p?.summary?.yearbuilt ?? 0,
+      sqft: p?.building?.size?.universalsize ?? 0,
+      address: p?.address?.oneLine ?? "",
     };
   } catch (error) {
     console.warn(`⚠️ Detail fetch failed for ID ${attomId}:`, error.message);
-    return { beds: 0, baths: 0 };
+    return { beds: 0, baths: 0, lotSize: 0, yearBuilt: 0, sqft: 0, address: "" };
   }
 };
 
@@ -83,7 +86,6 @@ app.get("/api/comps", async (req, res) => {
       ? new Date(now.setMonth(now.getMonth() - parseInt(soldInLastMonths)))
       : null;
 
-    // 👇 Use dynamic distance value from query
     const url = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/snapshot?latitude=${lat}&longitude=${lng}&radius=${distance}&pagesize=100`;
     const snapshotRes = await axios.get(url, {
       headers: { accept: "application/json", apikey: API_KEY },
@@ -92,6 +94,7 @@ app.get("/api/comps", async (req, res) => {
 
     const snapshot = snapshotRes.data.property || [];
 
+    let subject = null;
     const enriched = await Promise.all(
       snapshot.map(async (p, i) => {
         const attomId = p.identifier?.attomId;
@@ -104,19 +107,25 @@ app.get("/api/comps", async (req, res) => {
         const compLng = parseFloat(p.location?.longitude);
         const dist = haversineDistance(parseFloat(lat), parseFloat(lng), compLat, compLng);
 
-        return {
+        const result = {
           id: attomId || `attom-${i}`,
-          address: p.address?.oneLine || "Unknown",
+          address: detail.address || p.address?.oneLine || "Unknown",
           price: sale.price,
-          sqft: p.building?.size?.universalsize ?? 0,
+          sqft: detail.sqft,
           beds: detail.beds,
           baths: detail.baths,
+          lotSize: detail.lotSize,
+          yearBuilt: detail.yearBuilt,
           saleDate: sale.saleDate ? new Date(sale.saleDate).toISOString().split("T")[0] : null,
           lat: compLat,
           lng: compLng,
           distance: dist,
           color: "#FF0000",
         };
+
+        // Save the first property as subject
+        if (i === 0) subject = result;
+        return result;
       })
     );
 
@@ -138,7 +147,7 @@ app.get("/api/comps", async (req, res) => {
     });
 
     console.log(`✅ Filtered ${filtered.length} comps from ${snapshot.length} raw results`);
-    res.json(filtered);
+    res.json({ subject, comps: filtered });
   } catch (e) {
     console.error("❌ ATTOM API error:", e.response?.status || "unknown", e.message);
     res.status(500).json({ error: "Failed to fetch comps" });
