@@ -1,5 +1,3 @@
-// index.js — Express backend using ATTOM API with full filtering and detail enrichment
-
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
@@ -9,18 +7,27 @@ app.use(cors());
 
 const API_KEY = process.env.ATTOM_API_KEY;
 
-// Fetch extra details like beds/baths
+// Haversine distance in miles
+const haversineDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 3958.8; // Earth radius in miles
+  const toRad = deg => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
 const fetchPropertyDetails = async (attomId) => {
   try {
     const url = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/detail?id=${attomId}`;
     const res = await axios.get(url, {
-      headers: {
-        accept: "application/json",
-        apikey: API_KEY,
-      },
+      headers: { accept: "application/json", apikey: API_KEY },
       timeout: 5000,
     });
-
     const p = res.data.property?.[0];
     return {
       beds: p?.building?.rooms?.beds ?? 0,
@@ -32,18 +39,13 @@ const fetchPropertyDetails = async (attomId) => {
   }
 };
 
-// Fetch sale price and date
 const fetchSaleHistory = async (attomId) => {
   try {
     const url = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/saleshistory/snapshot?attomid=${attomId}`;
     const res = await axios.get(url, {
-      headers: {
-        accept: "application/json",
-        apikey: API_KEY,
-      },
+      headers: { accept: "application/json", apikey: API_KEY },
       timeout: 5000,
     });
-
     const sale = res.data.property?.[0]?.salehistory?.[0];
     return {
       price: sale?.amount?.saleamt || 0,
@@ -77,14 +79,13 @@ app.get("/api/comps", async (req, res) => {
 
   try {
     const now = new Date();
-    const monthsAgo = soldInLastMonths ? new Date(now.setMonth(now.getMonth() - parseInt(soldInLastMonths))) : null;
+    const monthsAgo = soldInLastMonths
+      ? new Date(now.setMonth(now.getMonth() - parseInt(soldInLastMonths)))
+      : null;
 
-    const url = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/snapshot?latitude=${lat}&longitude=${lng}&radius=${distance}&pagesize=100`;
+    const url = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/snapshot?latitude=${lat}&longitude=${lng}&radius=5&pagesize=100`;
     const snapshotRes = await axios.get(url, {
-      headers: {
-        accept: "application/json",
-        apikey: API_KEY,
-      },
+      headers: { accept: "application/json", apikey: API_KEY },
       timeout: 10000,
     });
 
@@ -98,6 +99,10 @@ app.get("/api/comps", async (req, res) => {
           fetchSaleHistory(attomId),
         ]);
 
+        const compLat = parseFloat(p.location?.latitude);
+        const compLng = parseFloat(p.location?.longitude);
+        const dist = haversineDistance(parseFloat(lat), parseFloat(lng), compLat, compLng);
+
         return {
           id: attomId || `attom-${i}`,
           address: p.address?.oneLine || "Unknown",
@@ -106,14 +111,16 @@ app.get("/api/comps", async (req, res) => {
           beds: detail.beds,
           baths: detail.baths,
           saleDate: sale.saleDate ? new Date(sale.saleDate).toISOString().split("T")[0] : null,
-          lat: p.location?.latitude,
-          lng: p.location?.longitude,
+          lat: compLat,
+          lng: compLng,
+          distance: dist,
           color: "#FF0000",
         };
       })
     );
 
     const filtered = enriched.filter((comp) => {
+      if (comp.distance > parseFloat(distance)) return false;
       if (bedsMin && comp.beds < parseInt(bedsMin)) return false;
       if (bedsMax && comp.beds > parseInt(bedsMax)) return false;
       if (bathsMin && comp.baths < parseFloat(bathsMin)) return false;
@@ -129,7 +136,7 @@ app.get("/api/comps", async (req, res) => {
       return true;
     });
 
-    console.log(`✅ ATTOM returned ${filtered.length} enriched comps`);
+    console.log(`✅ Filtered ${filtered.length} comps from ${snapshot.length} raw results`);
     res.json(filtered);
   } catch (e) {
     console.error("❌ ATTOM API error:", e.response?.status || "unknown", e.message);
