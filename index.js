@@ -9,8 +9,8 @@ const API_KEY = process.env.ATTOM_API_KEY;
 
 // Haversine distance in miles
 const haversineDistance = (lat1, lon1, lat2, lon2) => {
-  const R = 3958.8; // Earth radius in miles
-  const toRad = deg => (deg * Math.PI) / 180;
+  const R = 3958.8; // miles
+  const toRad = (deg) => (deg * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
   const a =
@@ -83,7 +83,8 @@ app.get("/api/comps", async (req, res) => {
       ? new Date(now.setMonth(now.getMonth() - parseInt(soldInLastMonths)))
       : null;
 
-    const url = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/snapshot?latitude=${lat}&longitude=${lng}&radius=5&pagesize=100`;
+    // 👇 Use dynamic distance value from query
+    const url = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/snapshot?latitude=${lat}&longitude=${lng}&radius=${distance}&pagesize=100`;
     const snapshotRes = await axios.get(url, {
       headers: { accept: "application/json", apikey: API_KEY },
       timeout: 10000,
