@@ -1,10 +1,52 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
+const passport = require("passport");
+const session = require("express-session");
+const jwt = require("jsonwebtoken");
+const connectDB = require("./config/db");
+const investmentRoutes = require("./routes/investments"); // ✅ NEW IMPORT
+require("./config/passport");
 
 const app = express();
-app.use(cors());
+connectDB();
 
+app.use(
+  cors({
+    origin: "http://localhost:3000",
+    credentials: true,
+  })
+);
+app.use(express.json());
+app.use(
+  session({
+    secret: process.env.JWT_SECRET,
+    resave: false,
+    saveUninitialized: false,
+  })
+);
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Google OAuth Routes
+app.get("/api/auth/google", passport.authenticate("google", { scope: ["profile", "email"] }));
+
+app.get(
+  "/api/auth/google/callback",
+  passport.authenticate("google", { session: false, failureRedirect: "/login" }),
+  (req, res) => {
+    const token = jwt.sign({ userId: req.user._id }, process.env.JWT_SECRET, {
+      expiresIn: "7d",
+    });
+    res.redirect(`http://localhost:3000/dashboard?token=${token}`);
+  }
+);
+
+// ✅ Register new investment routes
+app.use("/api/investments", investmentRoutes);
+
+// ---------------------- ATTOM Comps Logic ---------------------- //
 const API_KEY = process.env.ATTOM_API_KEY;
 
 const haversineDistance = (lat1, lon1, lat2, lon2) => {
@@ -14,9 +56,7 @@ const haversineDistance = (lat1, lon1, lat2, lon2) => {
   const dLon = toRad(lon2 - lon1);
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) *
-      Math.cos(toRad(lat2)) *
-      Math.sin(dLon / 2) ** 2;
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
@@ -123,7 +163,6 @@ app.get("/api/comps", async (req, res) => {
           color: "#FF0000",
         };
 
-        // Save the first property as subject
         if (i === 0) subject = result;
         return result;
       })
@@ -154,5 +193,6 @@ app.get("/api/comps", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 5000;
+// ---------------------- Start Server ---------------------- //
+const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
