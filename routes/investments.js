@@ -4,9 +4,10 @@ const jwt = require("jsonwebtoken");
 const Investment = require("../models/Investment");
 const User = require("../models/User");
 
-// Middleware to verify JWT
+// ✅ Middleware to verify JWT from cookie
 const requireAuth = (req, res, next) => {
-  const token = req.headers.authorization?.split(" ")[1]; // Format: Bearer <token>
+  const token = req.cookies.token; // ✅ Get token from HTTP-only cookie
+
   if (!token) return res.status(401).json({ error: "Unauthorized" });
 
   try {
@@ -14,11 +15,11 @@ const requireAuth = (req, res, next) => {
     req.userId = decoded.userId;
     next();
   } catch (err) {
-    res.status(403).json({ error: "Invalid token" });
+    return res.status(403).json({ error: "Invalid token" });
   }
 };
 
-// GET all investments for user
+// ✅ GET all investments for the logged-in user
 router.get("/", requireAuth, async (req, res) => {
   try {
     const investments = await Investment.find({ user: req.userId }).sort({ createdAt: -1 });
@@ -28,7 +29,7 @@ router.get("/", requireAuth, async (req, res) => {
   }
 });
 
-// POST a new investment
+// ✅ POST a new investment
 router.post("/", requireAuth, async (req, res) => {
   try {
     const data = req.body;

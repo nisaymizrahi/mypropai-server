@@ -5,8 +5,10 @@ const axios = require("axios");
 const passport = require("passport");
 const session = require("express-session");
 const jwt = require("jsonwebtoken");
+const cookieParser = require("cookie-parser"); // ✅ NEW
 const connectDB = require("./config/db");
-const investmentRoutes = require("./routes/investments"); // ✅ NEW IMPORT
+const investmentRoutes = require("./routes/investments");
+const requireAuth = require("./middleware/requireAuth"); // ✅ NEW
 require("./config/passport");
 
 const app = express();
@@ -14,11 +16,14 @@ connectDB();
 
 app.use(
   cors({
-    origin: "http://localhost:3000",
+    origin: "https://mypropai.onrender.com",
     credentials: true,
   })
 );
+
 app.use(express.json());
+app.use(cookieParser()); // ✅ Enable reading cookies
+
 app.use(
   session({
     secret: process.env.JWT_SECRET,
@@ -26,10 +31,11 @@ app.use(
     saveUninitialized: false,
   })
 );
+
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Google OAuth Routes
+// ------------------ Google Auth ------------------
 app.get("/api/auth/google", passport.authenticate("google", { scope: ["profile", "email"] }));
 
 app.get(
@@ -39,22 +45,29 @@ app.get(
     const token = jwt.sign({ userId: req.user._id }, process.env.JWT_SECRET, {
       expiresIn: "7d",
     });
-    res.redirect(`https://mypropai.onrender.com/dashboard?token=${token}`);
 
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "None", // important for cross-site cookies on Render
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    res.redirect("https://mypropai.onrender.com/dashboard");
   }
 );
 
-// ✅ Register new investment routes
-app.use("/api/investments", investmentRoutes);
+// ✅ Protected Investment Routes
+app.use("/api/investments", requireAuth, investmentRoutes);
 
-// ---------------------- ATTOM Comps Logic ---------------------- //
+// ------------------ Comps Endpoint ------------------
 const API_KEY = process.env.ATTOM_API_KEY;
 
 const haversineDistance = (lat1, lon1, lat2, lon2) => {
   const R = 3958.8;
   const toRad = (deg) => (deg * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
+  const dLon = toRad(lat2 - lon1);
   const a =
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
@@ -77,8 +90,7 @@ const fetchPropertyDetails = async (attomId) => {
       sqft: p?.building?.size?.universalsize ?? 0,
       address: p?.address?.oneLine ?? "",
     };
-  } catch (error) {
-    console.warn(`⚠️ Detail fetch failed for ID ${attomId}:`, error.message);
+  } catch {
     return { beds: 0, baths: 0, lotSize: 0, yearBuilt: 0, sqft: 0, address: "" };
   }
 };
@@ -95,8 +107,7 @@ const fetchSaleHistory = async (attomId) => {
       price: sale?.amount?.saleamt || 0,
       saleDate: sale?.saleTransDate || null,
     };
-  } catch (error) {
-    console.warn(`⚠️ Sale history fetch failed for ID ${attomId}:`, error.message);
+  } catch {
     return { price: 0, saleDate: null };
   }
 };
@@ -117,9 +128,7 @@ app.get("/api/comps", async (req, res) => {
     soldInLastMonths,
   } = req.query;
 
-  if (!lat || !lng) {
-    return res.status(400).json({ error: "Missing lat or lng" });
-  }
+  if (!lat || !lng) return res.status(400).json({ error: "Missing lat or lng" });
 
   try {
     const now = new Date();
@@ -179,14 +188,10 @@ app.get("/api/comps", async (req, res) => {
       if (sqftMax && comp.sqft > parseInt(sqftMax)) return false;
       if (priceMin && comp.price < parseInt(priceMin)) return false;
       if (priceMax && comp.price > parseInt(priceMax)) return false;
-      if (monthsAgo) {
-        if (!comp.saleDate) return false;
-        if (new Date(comp.saleDate) < monthsAgo) return false;
-      }
+      if (monthsAgo && (!comp.saleDate || new Date(comp.saleDate) < monthsAgo)) return false;
       return true;
     });
 
-    console.log(`✅ Filtered ${filtered.length} comps from ${snapshot.length} raw results`);
     res.json({ subject, comps: filtered });
   } catch (e) {
     console.error("❌ ATTOM API error:", e.response?.status || "unknown", e.message);
