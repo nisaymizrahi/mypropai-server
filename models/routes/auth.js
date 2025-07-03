@@ -14,7 +14,7 @@ function issueToken(res, user) {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxAge: 7 * 24 * 60 * 60 * 1000,
   });
   return token;
 }
@@ -71,8 +71,25 @@ router.get(
   passport.authenticate("google", { session: false, failureRedirect: "/login" }),
   (req, res) => {
     issueToken(res, req.user);
-    res.redirect("http://localhost:3000/dashboard");
+    res.redirect("https://mypropai.onrender.com/dashboard"); // ✅ UPDATED for live
   }
 );
+
+// --------- Get current user from cookie (for ProtectedRoute) ---------
+router.get("/me", async (req, res) => {
+  try {
+    const token = req.cookies.token;
+    if (!token) return res.status(401).json({ error: "No token" });
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await User.findById(decoded.userId).select("-password");
+
+    if (!user) return res.status(401).json({ error: "User not found" });
+
+    res.json(user);
+  } catch (err) {
+    res.status(401).json({ error: "Invalid token" });
+  }
+});
 
 module.exports = router;
