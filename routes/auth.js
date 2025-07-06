@@ -10,12 +10,14 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 // Utils
 function issueToken(res, user) {
   const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: "7d" });
+
   res.cookie("token", token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    secure: true,              // always secure on production (Render uses HTTPS)
+    sameSite: "None",          // CRITICAL for cross-origin cookie acceptance
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
+
   return token;
 }
 
@@ -75,7 +77,11 @@ router.post("/login", async (req, res) => {
 
 // --------- Logout ---------
 router.post("/logout", (req, res) => {
-  res.clearCookie("token");
+  res.clearCookie("token", {
+    httpOnly: true,
+    secure: true,
+    sameSite: "None",
+  });
   res.json({ message: "Logged out" });
 });
 
@@ -87,7 +93,7 @@ router.get(
   passport.authenticate("google", { session: false, failureRedirect: "/login" }),
   (req, res) => {
     issueToken(res, req.user);
-    res.redirect("https://mypropai.onrender.com/dashboard");
+    res.redirect("https://mypropai.onrender.com/dashboard"); // ✅ Final frontend redirect
   }
 );
 
