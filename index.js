@@ -16,13 +16,13 @@ require("./config/passport");
 const app = express();
 connectDB();
 
-// ✅ FIXED: Allow Authorization headers for token-based auth
+// ✅ Fixed CORS config with PATCH support
 app.use(
   cors({
     origin: "https://mypropai.onrender.com",
     credentials: true,
     allowedHeaders: ["Authorization", "Content-Type"],
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], // ✅ PATCH added
   })
 );
 
@@ -40,11 +40,10 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ✅ Routes
+// Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/investments", requireAuth, investmentRoutes);
 
-// ... other routes like /api/comps if needed ...
-
+// Start server
 const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
