@@ -8,17 +8,8 @@ const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 
 // Utils
-function issueToken(res, user) {
-  const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: "7d" });
-
-  res.cookie("token", token, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "None",
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
-
-  return token;
+function generateToken(user) {
+  return jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: "7d" });
 }
 
 // --------- Signup ---------
@@ -44,8 +35,8 @@ router.post("/signup", async (req, res) => {
     const hashed = await bcrypt.hash(password, 10);
     const user = await User.create({ email, password: hashed, name });
 
-    issueToken(res, user);
-    res.status(201).json({ user: { id: user._id, email: user.email, name: user.name } });
+    const token = generateToken(user);
+    res.status(201).json({ token, user: { id: user._id, email: user.email, name: user.name } });
   } catch (err) {
     console.error("Signup error:", err);
     res.status(500).json({ message: "Internal server error" });
@@ -67,8 +58,8 @@ router.post("/login", async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ message: "Invalid credentials" });
 
-    issueToken(res, user);
-    res.json({ user: { id: user._id, email: user.email, name: user.name } });
+    const token = generateToken(user);
+    res.json({ token, user: { id: user._id, email: user.email, name: user.name } });
   } catch (err) {
     console.error("Login error:", err);
     res.status(500).json({ message: "Internal server error" });
@@ -76,13 +67,9 @@ router.post("/login", async (req, res) => {
 });
 
 // --------- Logout ---------
+// Optional with token-based auth
 router.post("/logout", (req, res) => {
-  res.clearCookie("token", {
-    httpOnly: true,
-    secure: true,
-    sameSite: "None",
-  });
-  res.json({ message: "Logged out" });
+  res.json({ message: "Logout cleared (no cookies used)" });
 });
 
 // --------- Google OAuth ---------
@@ -92,24 +79,29 @@ router.get(
   "/google/callback",
   passport.authenticate("google", { session: false, failureRedirect: "/login" }),
   (req, res) => {
-    issueToken(res, req.user);
-    res.redirect("https://mypropai.onrender.com/login-continue"); // ✅ Final browser-compatible redirect
+    const token = generateToken(req.user);
+    const encodedToken = encodeURIComponent(token);
+    res.redirect(`https://mypropai.onrender.com/login-continue?token=${encodedToken}`);
   }
 );
 
 // --------- Check Session ---------
 router.get("/me", async (req, res) => {
   try {
-    const token = req.cookies.token;
-    if (!token) return res.status(401).json({ message: "No token" });
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Missing or invalid token" });
+    }
 
+    const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await User.findById(decoded.userId).select("-password");
 
+    const user = await User.findById(decoded.userId).select("-password");
     if (!user) return res.status(401).json({ message: "User not found" });
 
     res.json(user);
   } catch (err) {
+    console.error("Auth check failed:", err);
     res.status(401).json({ message: "Invalid or expired token" });
   }
 });
