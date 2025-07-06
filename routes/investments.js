@@ -3,18 +3,18 @@ const router = express.Router();
 const jwt = require("jsonwebtoken");
 const Investment = require("../models/Investment");
 
-// ✅ Updated middleware: Checks cookie first, then Authorization header
+// ✅ Improved middleware: Authorization header first, fallback to cookie
 const requireAuth = (req, res, next) => {
   let token = null;
 
-  // 1. Try cookie
-  if (req.cookies?.token) {
-    token = req.cookies.token;
+  // 1. Prefer Authorization header
+  if (req.headers.authorization?.startsWith("Bearer ")) {
+    token = req.headers.authorization.split(" ")[1];
   }
 
-  // 2. Fallback: Try Authorization header
-  if (!token && req.headers.authorization?.startsWith("Bearer ")) {
-    token = req.headers.authorization.split(" ")[1];
+  // 2. Fallback to cookie if header missing
+  if (!token && req.cookies?.token) {
+    token = req.cookies.token;
   }
 
   if (!token) {
@@ -26,6 +26,7 @@ const requireAuth = (req, res, next) => {
     req.userId = decoded.userId;
     next();
   } catch (err) {
+    console.error("Auth middleware failed:", err.message);
     return res.status(403).json({ error: "Invalid or expired token" });
   }
 };
