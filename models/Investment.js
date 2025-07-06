@@ -17,6 +17,8 @@ const investmentSchema = new mongoose.Schema(
     yearBuilt: { type: Number },
     arv: { type: Number }, // After Repair Value (for flips)
     rentEstimate: { type: Number }, // for rentals
+    initialBudget: { type: Number }, // ✅ NEW: renovation budget
+    renovationTargetDate: { type: Date }, // optional: for timeline tracking
     expenses: [
       {
         label: { type: String },
