@@ -67,7 +67,6 @@ router.post("/login", async (req, res) => {
 });
 
 // --------- Logout ---------
-// Optional with token-based auth
 router.post("/logout", (req, res) => {
   res.json({ message: "Logout cleared (no cookies used)" });
 });
@@ -79,9 +78,15 @@ router.get(
   "/google/callback",
   passport.authenticate("google", { session: false, failureRedirect: "/login" }),
   (req, res) => {
-    const token = generateToken(req.user);
-    const encodedToken = encodeURIComponent(token);
-    res.redirect(`https://mypropai.onrender.com/login-continue?token=${encodedToken}`);
+    try {
+      const token = generateToken(req.user);
+      const encodedToken = encodeURIComponent(token);
+      const redirectUrl = `https://mypropai.onrender.com/login-continue?token=${encodedToken}`;
+      res.redirect(redirectUrl);
+    } catch (err) {
+      console.error("Google login callback error:", err);
+      res.redirect("https://mypropai.onrender.com/login?error=token");
+    }
   }
 );
 
