@@ -53,4 +53,23 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
+// ✅ GET single investment by ID
+router.get("/:id", requireAuth, async (req, res) => {
+  try {
+    const investment = await Investment.findOne({
+      _id: req.params.id,
+      user: req.userId, // Make sure the user owns it
+    });
+
+    if (!investment) {
+      return res.status(404).json({ error: "Investment not found" });
+    }
+
+    res.json(investment);
+  } catch (err) {
+    console.error("Fetch single investment error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 module.exports = router;
