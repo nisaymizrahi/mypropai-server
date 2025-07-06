@@ -93,7 +93,7 @@ router.get(
   passport.authenticate("google", { session: false, failureRedirect: "/login" }),
   (req, res) => {
     issueToken(res, req.user);
-    res.redirect("https://mypropai.onrender.com?loggedin=true"); // ✅ Updated for Safari
+    res.redirect("https://mypropai.onrender.com/login-continue"); // ✅ Final browser-compatible redirect
   }
 );
 
