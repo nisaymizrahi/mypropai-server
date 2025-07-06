@@ -79,6 +79,11 @@ router.get(
   passport.authenticate("google", { session: false, failureRedirect: "/login" }),
   (req, res) => {
     try {
+      if (!req.user) {
+        console.error("Google callback error: No user returned from Passport");
+        return res.redirect("https://mypropai.onrender.com/login?error=nouser");
+      }
+
       const token = generateToken(req.user);
       const encodedToken = encodeURIComponent(token);
       const redirectUrl = `https://mypropai.onrender.com/login-continue?token=${encodedToken}`;
