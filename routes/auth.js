@@ -13,8 +13,8 @@ function issueToken(res, user) {
 
   res.cookie("token", token, {
     httpOnly: true,
-    secure: true,              // always secure on production (Render uses HTTPS)
-    sameSite: "None",          // CRITICAL for cross-origin cookie acceptance
+    secure: true,
+    sameSite: "None",
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 
@@ -93,7 +93,7 @@ router.get(
   passport.authenticate("google", { session: false, failureRedirect: "/login" }),
   (req, res) => {
     issueToken(res, req.user);
-    res.redirect("https://mypropai.onrender.com/dashboard"); // ✅ Final frontend redirect
+    res.redirect("https://mypropai.onrender.com?loggedin=true"); // ✅ Updated for Safari
   }
 );
 
