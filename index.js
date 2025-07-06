@@ -8,7 +8,7 @@ const cookieParser = require("cookie-parser");
 const connectDB = require("./config/db");
 
 const investmentRoutes = require("./routes/investments");
-const authRoutes = require("./routes/auth"); // ✅ Add this line
+const authRoutes = require("./routes/auth");
 const requireAuth = require("./middleware/requireAuth");
 
 require("./config/passport");
@@ -16,10 +16,13 @@ require("./config/passport");
 const app = express();
 connectDB();
 
+// ✅ FIXED: Allow Authorization headers for token-based auth
 app.use(
   cors({
     origin: "https://mypropai.onrender.com",
     credentials: true,
+    allowedHeaders: ["Authorization", "Content-Type"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   })
 );
 
@@ -37,13 +40,11 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ✅ Use centralized auth routes (don't duplicate Google login in here)
+// ✅ Routes
 app.use("/api/auth", authRoutes);
-
-// ✅ Protected Investment Routes
 app.use("/api/investments", requireAuth, investmentRoutes);
 
-// ... your /api/comps route remains unchanged ...
+// ... other routes like /api/comps if needed ...
 
 const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
