@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const jwt = require("jsonwebtoken");
 const Investment = require("../models/Investment");
 const requireAuth = require("../middleware/requireAuth");
 
@@ -37,13 +36,12 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
-// PATCH update investment
+// PATCH full investment update
 router.patch("/:id", requireAuth, async (req, res) => {
   try {
     const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
     if (!investment) return res.status(404).json({ message: "Investment not found" });
 
-    // ✅ Fields allowed to be updated
     const fields = [
       "address", "type", "purchasePrice", "lotSize", "sqft",
       "bedrooms", "bathrooms", "yearBuilt", "arv", "rentEstimate",
@@ -64,4 +62,28 @@ router.patch("/:id", requireAuth, async (req, res) => {
   }
 });
 
-module.exports = router;
+// PATCH specific budget line by index
+router.patch("/:id/budget/:index", requireAuth, async (req, res) => {
+  try {
+    const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
+    if (!investment) return res.status(404).json({ message: "Investment not found" });
+
+    const index = parseInt(req.params.index);
+    if (!investment.budget || index < 0 || index >= investment.budget.length) {
+      return res.status(400).json({ message: "Invalid budget line index" });
+    }
+
+    const line = investment.budget[index];
+
+    if (req.body.category !== undefined) line.category = req.body.category;
+    if (req.body.description !== undefined) line.description = req.body.description;
+    if (req.body.amount !== undefined) line.amount = req.body.amount;
+    if (req.body.status !== undefined) line.status = req.body.status;
+
+    await investment.save();
+    res.json(investment);
+  } catch (err) {
+    console.error("Update budget line error:", err);
+    res.status(500).json({ error: "Failed to update budget line" });
+  }
+});
