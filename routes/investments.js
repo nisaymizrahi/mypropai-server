@@ -87,4 +87,5 @@ router.patch("/:id/budget/:index", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Failed to update budget line" });
   }
 });
+
 module.exports = router;
