@@ -19,16 +19,21 @@ const investmentSchema = new mongoose.Schema(
     rentEstimate: { type: Number },
     renovationTargetDate: { type: Date },
 
-    // ✅ New: structured renovation budget
+    // ✅ Updated budget with status tracking
     budget: [
       {
         category: { type: String, required: true },
         description: { type: String },
         amount: { type: Number, required: true },
+        status: {
+          type: String,
+          enum: ["Not Started", "In Progress", "Completed"],
+          default: "Not Started",
+        },
       },
     ],
 
-    // ✅ Existing: dynamic actual expenses
+    // ✅ Dynamic expense tracking
     expenses: [
       {
         label: { type: String },
