@@ -88,4 +88,49 @@ router.patch("/:id/budget/:index", requireAuth, async (req, res) => {
   }
 });
 
+// ✅ PATCH a specific expense by index
+router.patch("/:id/expenses/:index", requireAuth, async (req, res) => {
+  try {
+    const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
+    if (!investment) return res.status(404).json({ message: "Investment not found" });
+
+    const index = parseInt(req.params.index);
+    if (!investment.expenses || index < 0 || index >= investment.expenses.length) {
+      return res.status(400).json({ message: "Invalid expense index" });
+    }
+
+    const expense = investment.expenses[index];
+    if (req.body.category !== undefined) expense.category = req.body.category;
+    if (req.body.type !== undefined) expense.type = req.body.type;
+    if (req.body.amount !== undefined) expense.amount = req.body.amount;
+    if (req.body.date !== undefined) expense.date = req.body.date;
+
+    await investment.save();
+    res.json(investment);
+  } catch (err) {
+    console.error("Update expense error:", err);
+    res.status(500).json({ error: "Failed to update expense" });
+  }
+});
+
+// ✅ DELETE a specific expense by index
+router.delete("/:id/expenses/:index", requireAuth, async (req, res) => {
+  try {
+    const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
+    if (!investment) return res.status(404).json({ message: "Investment not found" });
+
+    const index = parseInt(req.params.index);
+    if (!investment.expenses || index < 0 || index >= investment.expenses.length) {
+      return res.status(400).json({ message: "Invalid expense index" });
+    }
+
+    investment.expenses.splice(index, 1);
+    await investment.save();
+    res.json(investment);
+  } catch (err) {
+    console.error("Delete expense error:", err);
+    res.status(500).json({ error: "Failed to delete expense" });
+  }
+});
+
 module.exports = router;
