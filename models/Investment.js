@@ -15,10 +15,20 @@ const investmentSchema = new mongoose.Schema(
     bedrooms: { type: Number },
     bathrooms: { type: Number },
     yearBuilt: { type: Number },
-    arv: { type: Number }, // After Repair Value (for flips)
-    rentEstimate: { type: Number }, // for rentals
-    initialBudget: { type: Number }, // ✅ NEW: renovation budget
-    renovationTargetDate: { type: Date }, // optional: for timeline tracking
+    arv: { type: Number },
+    rentEstimate: { type: Number },
+    renovationTargetDate: { type: Date },
+
+    // ✅ New: structured renovation budget
+    budget: [
+      {
+        category: { type: String, required: true },
+        description: { type: String },
+        amount: { type: Number, required: true },
+      },
+    ],
+
+    // ✅ Existing: dynamic actual expenses
     expenses: [
       {
         label: { type: String },

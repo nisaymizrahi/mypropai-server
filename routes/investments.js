@@ -41,14 +41,13 @@ router.post("/", requireAuth, async (req, res) => {
 router.patch("/:id", requireAuth, async (req, res) => {
   try {
     const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
-
     if (!investment) return res.status(404).json({ message: "Investment not found" });
 
-    // ✅ Allowed fields to update
+    // ✅ Fields allowed to be updated
     const fields = [
       "address", "type", "purchasePrice", "lotSize", "sqft",
       "bedrooms", "bathrooms", "yearBuilt", "arv", "rentEstimate",
-      "initialBudget", "expenses"
+      "initialBudget", "expenses", "budget", "renovationTargetDate"
     ];
 
     fields.forEach((field) => {
