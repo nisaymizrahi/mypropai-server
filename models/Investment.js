@@ -15,11 +15,12 @@ const investmentSchema = new mongoose.Schema(
     bedrooms: { type: Number },
     bathrooms: { type: Number },
     yearBuilt: { type: Number },
+    unitCount: { type: Number }, // ✅ Added unit count for multifamily/mixed-use/commercial
     arv: { type: Number },
     rentEstimate: { type: Number },
     renovationTargetDate: { type: Date },
 
-    // ✅ Updated budget with status tracking
+    // Renovation budget lines
     budget: [
       {
         category: { type: String, required: true },
@@ -33,10 +34,10 @@ const investmentSchema = new mongoose.Schema(
       },
     ],
 
-    // ✅ Dynamic expense tracking
+    // Expense entries
     expenses: [
       {
-        label: { type: String },
+        label: { type: String }, // ✅ Added label field for custom notes
         category: { type: String },
         amount: { type: Number },
         date: { type: Date, default: Date.now },
