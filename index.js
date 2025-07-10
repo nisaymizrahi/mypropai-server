@@ -1,7 +1,6 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios");
 const passport = require("passport");
 const session = require("express-session");
 const cookieParser = require("cookie-parser");
@@ -9,6 +8,7 @@ const connectDB = require("./config/db");
 
 const investmentRoutes = require("./routes/investments");
 const authRoutes = require("./routes/auth");
+const compsRoutes = require("./routes/comps"); // Import the new comps route
 const requireAuth = require("./middleware/requireAuth");
 
 require("./config/passport");
@@ -16,13 +16,12 @@ require("./config/passport");
 const app = express();
 connectDB();
 
-// ✅ Fixed CORS config with PATCH support
 app.use(
   cors({
     origin: "https://mypropai.onrender.com",
     credentials: true,
     allowedHeaders: ["Authorization", "Content-Type"],
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], // ✅ PATCH added
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   })
 );
 
@@ -43,6 +42,7 @@ app.use(passport.session());
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/investments", requireAuth, investmentRoutes);
+app.use("/api/comps", requireAuth, compsRoutes); // Use the new comps route and protect it
 
 // Start server
 const PORT = process.env.PORT || 5001;
