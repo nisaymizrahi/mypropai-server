@@ -88,7 +88,7 @@ router.patch("/:id/budget/:index", requireAuth, async (req, res) => {
   }
 });
 
-// ✅ PATCH a specific expense by index
+// PATCH a specific expense by index
 router.patch("/:id/expenses/:index", requireAuth, async (req, res) => {
   try {
     const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
@@ -101,7 +101,7 @@ router.patch("/:id/expenses/:index", requireAuth, async (req, res) => {
 
     const expense = investment.expenses[index];
     if (req.body.category !== undefined) expense.category = req.body.category;
-    if (req.body.type !== undefined) expense.type = req.body.type;
+    if (req.body.label !== undefined) expense.label = req.body.label;
     if (req.body.amount !== undefined) expense.amount = req.body.amount;
     if (req.body.date !== undefined) expense.date = req.body.date;
 
@@ -113,7 +113,7 @@ router.patch("/:id/expenses/:index", requireAuth, async (req, res) => {
   }
 });
 
-// ✅ DELETE a specific expense by index
+// DELETE a specific expense by index
 router.delete("/:id/expenses/:index", requireAuth, async (req, res) => {
   try {
     const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
@@ -130,6 +130,18 @@ router.delete("/:id/expenses/:index", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("Delete expense error:", err);
     res.status(500).json({ error: "Failed to delete expense" });
+  }
+});
+
+// DELETE an entire investment
+router.delete("/:id", requireAuth, async (req, res) => {
+  try {
+    const deleted = await Investment.findOneAndDelete({ _id: req.params.id, user: req.userId });
+    if (!deleted) return res.status(404).json({ message: "Investment not found" });
+    res.json({ message: "Investment deleted" });
+  } catch (err) {
+    console.error("Delete investment error:", err);
+    res.status(500).json({ error: "Failed to delete investment" });
   }
 });
 
