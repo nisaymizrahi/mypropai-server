@@ -2,55 +2,54 @@ const express = require("express");
 const axios = require("axios");
 const router = express.Router();
 
-// This is the new route to handle comp searches
-// It will be accessed via GET /api/comps
+// FIXED: This route now correctly accepts latitude and longitude
 router.get("/", async (req, res) => {
-  const { lat, lng, distance, propertyType, soldInLastMonths } = req.query;
+  const { lat, lng, radius = 1 } = req.query;
 
   if (!lat || !lng) {
     return res.status(400).json({ message: "Latitude and longitude are required." });
   }
 
-  // These are the options for the external Realtor.com API
-  const options = {
-    method: 'GET',
-    url: 'https://realtor.p.rapidapi.com/properties/v3/list-similar-for-sale',
-    params: {
-      property_id: '123456789', // This is a placeholder, the API uses lat/lng primarily
-      limit: '40',
-      lat: lat,
-      lon: lng,
-      radius: distance || '1.0',
-    },
-    headers: {
-      'X-RapidAPI-Key': process.env.REALTOR_API_KEY,
-      'X-RapidAPI-Host': 'realtor.p.rapidapi.com'
-    }
-  };
+  const ATTOM_API_KEY = process.env.ATTOM_API_KEY;
+  if (!ATTOM_API_KEY) {
+    console.error("ATTOM_API_KEY is not set on the server.");
+    return res.status(500).json({ message: "Server is missing API key." });
+  }
 
   try {
-    const response = await axios.request(options);
-    const properties = response.data?.data?.home_search?.results || [];
+    // Use coordinates to find comparable sales history from Attom
+    const salesHistoryResponse = await axios.get('https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/saleshistory', {
+        params: {
+            latitude: lat,
+            longitude: lng,
+            radius,
+            orderBy: "saleDate desc",
+            pageSize: 40
+        },
+        headers: { 'apikey': ATTOM_API_KEY, 'Accept': 'application/json' }
+    });
 
-    // Transform the data to match what the frontend expects
-    const formattedComps = properties.map(prop => ({
-        id: prop.property_id,
-        address: `${prop.location.address.line}, ${prop.location.address.city}, ${prop.location.address.state_code} ${prop.location.address.postal_code}`,
-        beds: prop.description.beds,
-        baths: prop.description.baths_full,
-        sqft: prop.description.sqft,
-        price: prop.list_price,
-        saleDate: prop.list_date, // Using list_date as a stand-in for saleDate
-        lat: prop.location.address.coordinate.lat,
-        lng: prop.location.address.coordinate.lon,
-        distance: prop.location.search_comments?.distance_from_subject || 0
+    const sales = salesHistoryResponse.data?.property || [];
+    
+    // Transform the Attom data to match what the frontend expects
+    const formattedComps = sales.map(prop => ({
+        id: prop.identifier.attomId,
+        address: `${prop.address.line1}, ${prop.address.locality}, ${prop.address.countrySubd} ${prop.address.postal1}`,
+        beds: prop.building?.rooms?.beds,
+        baths: prop.building?.rooms?.bathsFull,
+        sqft: prop.building?.size?.bldgsize,
+        price: prop.sale?.amount,
+        saleDate: prop.sale?.saleDate,
+        lat: prop.location.latitude,
+        lng: prop.location.longitude,
+        distance: prop.location.distance
     }));
 
     res.json(formattedComps);
 
   } catch (error) {
-    console.error("Error fetching comps from Realtor API:", error.response ? error.response.data : error.message);
-    res.status(500).json({ message: "Failed to fetch comps from external API." });
+    console.error("Error fetching comps from Attom API:", error.response ? error.response.data : error.message);
+    res.status(500).json({ message: "Failed to fetch comps from the Attom API." });
   }
 });
 
