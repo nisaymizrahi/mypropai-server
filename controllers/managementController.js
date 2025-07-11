@@ -216,17 +216,16 @@ exports.getLeaseById = async (req, res) => {
                 path: 'unit',
                 populate: {
                     path: 'property',
-                    select: 'address'
+                    select: 'address user'
                 }
             });
 
-        if (!lease) {
-            return res.status(404).json({ msg: 'Lease not found' });
+        if (!lease || !lease.unit || !lease.unit.property) {
+            return res.status(404).json({ msg: 'Lease or associated property not found' });
         }
-        
-        // UPDATED: More robust authorization check.
-        // We verify that the user ID on the tenant matches the logged-in user.
-        if (lease.tenant.user.toString() !== req.user.id) {
+
+        // CORRECTED: This is the definitive authorization check.
+        if (lease.unit.property.user.toString() !== req.user.id) {
             return res.status(401).json({ msg: 'User not authorized' });
         }
 
@@ -247,13 +246,17 @@ exports.addTransactionToLease = async (req, res) => {
     }
 
     try {
-        const lease = await Lease.findById(leaseId).populate('tenant');
+        const lease = await Lease.findById(leaseId).populate({
+            path: 'unit',
+            populate: { path: 'property', select: 'user' }
+        });
 
-        if (!lease) {
-            return res.status(404).json({ msg: 'Lease not found.' });
+        if (!lease || !lease.unit || !lease.unit.property) {
+            return res.status(404).json({ msg: 'Lease or associated property not found.' });
         }
-        // UPDATED: More robust authorization check.
-        if (lease.tenant.user.toString() !== req.user.id) {
+        
+        // CORRECTED: This is the definitive authorization check.
+        if (lease.unit.property.user.toString() !== req.user.id) {
             return res.status(401).json({ msg: 'User not authorized.' });
         }
 
