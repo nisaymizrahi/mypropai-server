@@ -20,7 +20,7 @@ const storage = new CloudinaryStorage({
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
         // Remove file extension from original name before adding unique suffix
         const fileName = file.originalname.split('.').slice(0, -1).join('.');
-        return `${req.user.id}-${fileName}-${uniqueSuffix}`;
+        return `receipt-${fileName}-${uniqueSuffix}`;
     },
   },
 });
