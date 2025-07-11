@@ -8,7 +8,8 @@ const connectDB = require("./config/db");
 
 const investmentRoutes = require("./routes/investments");
 const authRoutes = require("./routes/auth");
-const compsRoutes = require("./routes/comps"); // Import the new comps route
+const compsRoutes = require("./routes/comps");
+const uploadRoutes = require("./routes/uploads"); // NEW: Import the upload routes
 const requireAuth = require("./middleware/requireAuth");
 
 require("./config/passport");
@@ -42,7 +43,8 @@ app.use(passport.session());
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/investments", requireAuth, investmentRoutes);
-app.use("/api/comps", requireAuth, compsRoutes); // Use the new comps route and protect it
+app.use("/api/comps", requireAuth, compsRoutes);
+app.use("/api/uploads", requireAuth, uploadRoutes); // NEW: Use the upload routes and protect them
 
 // Start server
 const PORT = process.env.PORT || 5001;
