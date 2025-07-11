@@ -36,33 +36,37 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
-// PATCH full investment update
+// PATCH (Update) a full investment
 router.patch("/:id", requireAuth, async (req, res) => {
   try {
-    const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
+    const investment = await Investment.findOneAndUpdate(
+      { _id: req.params.id, user: req.userId },
+      { $set: req.body },
+      { new: true }
+    );
     if (!investment) return res.status(404).json({ message: "Investment not found" });
-
-    const fields = [
-      "address", "type", "purchasePrice", "lotSize", "sqft",
-      "bedrooms", "bathrooms", "yearBuilt", "arv", "rentEstimate",
-      "initialBudget", "expenses", "budget", "renovationTargetDate"
-    ];
-
-    fields.forEach((field) => {
-      if (req.body[field] !== undefined) {
-        investment[field] = req.body[field];
-      }
-    });
-
-    const updated = await investment.save();
-    res.json(updated);
+    res.json(investment);
   } catch (err) {
     console.error("Update error:", err);
     res.status(500).json({ error: "Failed to update investment" });
   }
 });
 
-// PATCH specific budget line by index
+// --- NEW: Route to ADD a new budget line ---
+router.post("/:id/budget", requireAuth, async (req, res) => {
+    try {
+        const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
+        if (!investment) return res.status(404).json({ message: "Investment not found" });
+
+        investment.budget.push(req.body);
+        await investment.save();
+        res.status(201).json(investment);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to add budget line" });
+    }
+});
+
+// PATCH a specific budget line by index
 router.patch("/:id/budget/:index", requireAuth, async (req, res) => {
   try {
     const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
@@ -72,20 +76,31 @@ router.patch("/:id/budget/:index", requireAuth, async (req, res) => {
     if (!investment.budget || index < 0 || index >= investment.budget.length) {
       return res.status(400).json({ message: "Invalid budget line index" });
     }
-
-    const line = investment.budget[index];
-
-    if (req.body.category !== undefined) line.category = req.body.category;
-    if (req.body.description !== undefined) line.description = req.body.description;
-    if (req.body.amount !== undefined) line.amount = req.body.amount;
-    if (req.body.status !== undefined) line.status = req.body.status;
-
+    
+    // Update fields provided in the request body
+    Object.keys(req.body).forEach(key => {
+        investment.budget[index][key] = req.body[key];
+    });
+    
     await investment.save();
     res.json(investment);
   } catch (err) {
-    console.error("Update budget line error:", err);
     res.status(500).json({ error: "Failed to update budget line" });
   }
+});
+
+// --- NEW: Route to ADD a new expense ---
+router.post("/:id/expenses", requireAuth, async (req, res) => {
+    try {
+        const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
+        if (!investment) return res.status(404).json({ message: "Investment not found" });
+
+        investment.expenses.push(req.body);
+        await investment.save();
+        res.status(201).json(investment);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to add expense" });
+    }
 });
 
 // PATCH a specific expense by index
@@ -99,16 +114,13 @@ router.patch("/:id/expenses/:index", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "Invalid expense index" });
     }
 
-    const expense = investment.expenses[index];
-    if (req.body.category !== undefined) expense.category = req.body.category;
-    if (req.body.label !== undefined) expense.label = req.body.label;
-    if (req.body.amount !== undefined) expense.amount = req.body.amount;
-    if (req.body.date !== undefined) expense.date = req.body.date;
+    Object.keys(req.body).forEach(key => {
+        investment.expenses[index][key] = req.body[key];
+    });
 
     await investment.save();
     res.json(investment);
   } catch (err) {
-    console.error("Update expense error:", err);
     res.status(500).json({ error: "Failed to update expense" });
   }
 });
@@ -128,7 +140,6 @@ router.delete("/:id/expenses/:index", requireAuth, async (req, res) => {
     await investment.save();
     res.json(investment);
   } catch (err) {
-    console.error("Delete expense error:", err);
     res.status(500).json({ error: "Failed to delete expense" });
   }
 });
@@ -140,7 +151,6 @@ router.delete("/:id", requireAuth, async (req, res) => {
     if (!deleted) return res.status(404).json({ message: "Investment not found" });
     res.json({ message: "Investment deleted" });
   } catch (err) {
-    console.error("Delete investment error:", err);
     res.status(500).json({ error: "Failed to delete investment" });
   }
 });
