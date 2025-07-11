@@ -216,15 +216,17 @@ exports.getLeaseById = async (req, res) => {
                 path: 'unit',
                 populate: {
                     path: 'property',
-                    select: 'address user' // Also populate user to verify ownership
+                    select: 'address'
                 }
             });
 
         if (!lease) {
             return res.status(404).json({ msg: 'Lease not found' });
         }
-
-        if (lease.unit.property.user.toString() !== req.user.id) {
+        
+        // UPDATED: More robust authorization check.
+        // We verify that the user ID on the tenant matches the logged-in user.
+        if (lease.tenant.user.toString() !== req.user.id) {
             return res.status(401).json({ msg: 'User not authorized' });
         }
 
@@ -235,7 +237,7 @@ exports.getLeaseById = async (req, res) => {
     }
 };
 
-// NEW: @desc    Add a transaction to a lease's ledger
+// @desc    Add a transaction to a lease's ledger
 exports.addTransactionToLease = async (req, res) => {
     const { leaseId } = req.params;
     const { date, type, description, amount } = req.body;
@@ -245,22 +247,19 @@ exports.addTransactionToLease = async (req, res) => {
     }
 
     try {
-        const lease = await Lease.findById(leaseId).populate({
-            path: 'unit',
-            populate: { path: 'property', select: 'user' }
-        });
+        const lease = await Lease.findById(leaseId).populate('tenant');
 
         if (!lease) {
             return res.status(404).json({ msg: 'Lease not found.' });
         }
-        if (lease.unit.property.user.toString() !== req.user.id) {
+        // UPDATED: More robust authorization check.
+        if (lease.tenant.user.toString() !== req.user.id) {
             return res.status(401).json({ msg: 'User not authorized.' });
         }
 
         lease.transactions.push({ date, type, description, amount: Number(amount) });
         await lease.save();
         
-        // Return the newly created transaction
         res.status(201).json(lease.transactions[lease.transactions.length - 1]);
 
     } catch (err) {
