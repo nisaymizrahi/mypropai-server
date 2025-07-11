@@ -32,6 +32,12 @@ router.post('/units/:unitId/lease', auth, managementController.addLeaseToUnit);
 // @access  Private
 router.get('/leases/:leaseId', auth, managementController.getLeaseById);
 
+// ✅ NEW: Save one-time payment or charge
+// @route   POST /api/management/leases/:leaseId/transactions
+// @desc    Add a transaction to a lease ledger
+// @access  Private
+router.post('/leases/:leaseId/transactions', auth, managementController.addTransactionToLease);
+
 // ✅ NEW: Run recurring charges (automated or manual trigger)
 // @route   POST /api/management/recurring/run
 // @desc    Apply today's scheduled recurring charges
