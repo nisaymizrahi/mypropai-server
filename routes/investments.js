@@ -6,7 +6,8 @@ const requireAuth = require("../middleware/requireAuth");
 // GET all investments for the logged-in user
 router.get("/", requireAuth, async (req, res) => {
   try {
-    const investments = await Investment.find({ user: req.userId }).sort({ createdAt: -1 });
+    // UPDATED: Changed req.userId to req.user.id
+    const investments = await Investment.find({ user: req.user.id }).sort({ createdAt: -1 });
     res.json(investments);
   } catch (err) {
     res.status(500).json({ error: "Server error" });
@@ -16,7 +17,8 @@ router.get("/", requireAuth, async (req, res) => {
 // GET single investment by ID
 router.get("/:id", requireAuth, async (req, res) => {
   try {
-    const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
+    // UPDATED: Changed req.userId to req.user.id
+    const investment = await Investment.findOne({ _id: req.params.id, user: req.user.id });
     if (!investment) return res.status(404).json({ message: "Not found" });
     res.json(investment);
   } catch (err) {
@@ -28,7 +30,8 @@ router.get("/:id", requireAuth, async (req, res) => {
 router.post("/", requireAuth, async (req, res) => {
   try {
     const data = req.body;
-    const investment = await Investment.create({ ...data, user: req.userId });
+    // UPDATED: Changed req.userId to req.user.id
+    const investment = await Investment.create({ ...data, user: req.user.id });
     res.status(201).json(investment);
   } catch (err) {
     console.error("Create error:", err);
@@ -39,8 +42,9 @@ router.post("/", requireAuth, async (req, res) => {
 // PATCH (Update) a full investment
 router.patch("/:id", requireAuth, async (req, res) => {
   try {
+    // UPDATED: Changed req.userId to req.user.id
     const investment = await Investment.findOneAndUpdate(
-      { _id: req.params.id, user: req.userId },
+      { _id: req.params.id, user: req.user.id },
       { $set: req.body },
       { new: true }
     );
@@ -55,7 +59,8 @@ router.patch("/:id", requireAuth, async (req, res) => {
 // POST a new budget line
 router.post("/:id/budget", requireAuth, async (req, res) => {
     try {
-        const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
+        // UPDATED: Changed req.userId to req.user.id
+        const investment = await Investment.findOne({ _id: req.params.id, user: req.user.id });
         if (!investment) return res.status(404).json({ message: "Investment not found" });
 
         investment.budget.push(req.body);
@@ -69,7 +74,8 @@ router.post("/:id/budget", requireAuth, async (req, res) => {
 // PATCH a specific budget line by index
 router.patch("/:id/budget/:index", requireAuth, async (req, res) => {
   try {
-    const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
+    // UPDATED: Changed req.userId to req.user.id
+    const investment = await Investment.findOne({ _id: req.params.id, user: req.user.id });
     if (!investment) return res.status(404).json({ message: "Investment not found" });
 
     const index = parseInt(req.params.index);
@@ -88,10 +94,11 @@ router.patch("/:id/budget/:index", requireAuth, async (req, res) => {
   }
 });
 
-// --- NEW: Route to DELETE a specific budget line by index ---
+// DELETE a specific budget line by index
 router.delete("/:id/budget/:index", requireAuth, async (req, res) => {
   try {
-    const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
+    // UPDATED: Changed req.userId to req.user.id
+    const investment = await Investment.findOne({ _id: req.params.id, user: req.user.id });
     if (!investment) return res.status(404).json({ message: "Investment not found" });
 
     const index = parseInt(req.params.index);
@@ -111,7 +118,8 @@ router.delete("/:id/budget/:index", requireAuth, async (req, res) => {
 // POST a new expense
 router.post("/:id/expenses", requireAuth, async (req, res) => {
     try {
-        const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
+        // UPDATED: Changed req.userId to req.user.id
+        const investment = await Investment.findOne({ _id: req.params.id, user: req.user.id });
         if (!investment) return res.status(404).json({ message: "Investment not found" });
 
         investment.expenses.push(req.body);
@@ -125,7 +133,8 @@ router.post("/:id/expenses", requireAuth, async (req, res) => {
 // PATCH a specific expense by index
 router.patch("/:id/expenses/:index", requireAuth, async (req, res) => {
   try {
-    const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
+    // UPDATED: Changed req.userId to req.user.id
+    const investment = await Investment.findOne({ _id: req.params.id, user: req.user.id });
     if (!investment) return res.status(404).json({ message: "Investment not found" });
 
     const index = parseInt(req.params.index);
@@ -147,7 +156,8 @@ router.patch("/:id/expenses/:index", requireAuth, async (req, res) => {
 // DELETE a specific expense by index
 router.delete("/:id/expenses/:index", requireAuth, async (req, res) => {
   try {
-    const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
+    // UPDATED: Changed req.userId to req.user.id
+    const investment = await Investment.findOne({ _id: req.params.id, user: req.user.id });
     if (!investment) return res.status(404).json({ message: "Investment not found" });
 
     const index = parseInt(req.params.index);
@@ -166,7 +176,8 @@ router.delete("/:id/expenses/:index", requireAuth, async (req, res) => {
 // DELETE an entire investment
 router.delete("/:id", requireAuth, async (req, res) => {
   try {
-    const deleted = await Investment.findOneAndDelete({ _id: req.params.id, user: req.userId });
+    // UPDATED: Changed req.userId to req.user.id
+    const deleted = await Investment.findOneAndDelete({ _id: req.params.id, user: req.user.id });
     if (!deleted) return res.status(404).json({ message: "Investment not found" });
     res.json({ message: "Investment deleted" });
   } catch (err) {
