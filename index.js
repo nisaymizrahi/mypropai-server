@@ -10,8 +10,7 @@ const investmentRoutes = require("./routes/investments");
 const authRoutes = require("./routes/auth");
 const compsRoutes = require("./routes/comps");
 const uploadRoutes = require("./routes/uploads");
-// NEW: Import the management routes
-const managementRoutes = require("./routes/management"); 
+const managementRoutes = require("./routes/management");
 const requireAuth = require("./middleware/requireAuth");
 
 require("./config/passport");
@@ -19,14 +18,31 @@ require("./config/passport");
 const app = express();
 connectDB();
 
+// --- NEW: CORS Configuration for Development and Production ---
+const allowedOrigins = ["https://mypropai.onrender.com"];
+// If we are not in a production environment, allow localhost for development
+if (process.env.NODE_ENV !== 'production') {
+  allowedOrigins.push('http://localhost:3000');
+}
+
 app.use(
   cors({
-    origin: "https://mypropai.onrender.com",
+    origin: function (origin, callback) {
+      // allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) === -1) {
+        const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+        return callback(new Error(msg), false);
+      }
+      return callback(null, true);
+    },
     credentials: true,
     allowedHeaders: ["Authorization", "Content-Type"],
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   })
 );
+// --- End of CORS Configuration ---
+
 
 app.use(express.json());
 app.use(cookieParser());
@@ -46,8 +62,7 @@ app.use(passport.session());
 app.use("/api/auth", authRoutes);
 app.use("/api/investments", requireAuth, investmentRoutes);
 app.use("/api/comps", requireAuth, compsRoutes);
-app.use("/api/uploads", requireAuth, uploadRoutes); 
-// NEW: Use the management routes and protect them
+app.use("/api/uploads", requireAuth, uploadRoutes);
 app.use("/api/management", requireAuth, managementRoutes);
 
 // Start server
