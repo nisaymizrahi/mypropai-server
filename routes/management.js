@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-// CORRECTED: Changed the path to point to the correct middleware file name
 const auth = require('../middleware/requireAuth'); 
 const managementController = require('../controllers/managementController');
 
@@ -29,6 +28,24 @@ router.get(
     '/unmanaged-properties',
     auth,
     managementController.getUnmanagedProperties
+);
+
+// @route   GET /api/management/:propertyId
+// @desc    Get a single managed property by ID
+// @access  Private
+router.get(
+    '/:propertyId',
+    auth,
+    managementController.getManagedPropertyById
+);
+
+// NEW: @route   POST /api/management/:propertyId/units
+// @desc    Add a new unit to a managed property
+// @access  Private
+router.post(
+    '/:propertyId/units',
+    auth,
+    managementController.addUnitToProperty
 );
 
 module.exports = router;
