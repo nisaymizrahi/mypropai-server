@@ -136,7 +136,6 @@ exports.getLeaseById = async (req, res) => {
         if (lease.tenant.user.toString() !== req.user.id) {
             return res.status(401).json({ msg: 'User not authorized' });
         }
-        // Repopulate with all details after authorization
         const finalLease = await Lease.findById(req.params.leaseId)
             .populate('tenant')
             .populate({
@@ -172,5 +171,58 @@ exports.addTransactionToLease = async (req, res) => {
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Server Error');
+    }
+};
+
+// ✅ NEW: Automatically apply recurring charges for today
+exports.runRecurringChargesForToday = async (req, res) => {
+    try {
+        const today = new Date();
+        const day = today.getDate();
+
+        const leases = await Lease.find({
+            isActive: true,
+            recurringCharges: { $exists: true, $ne: [] }
+        });
+
+        let addedCount = 0;
+
+        for (const lease of leases) {
+            const tenant = await Tenant.findById(lease.tenant);
+            if (!tenant || tenant.user.toString() !== req.user.id) continue;
+
+            for (const recurring of lease.recurringCharges) {
+                if (recurring.dayOfMonth !== day) continue;
+
+                const alreadyCharged = lease.transactions.some(tx => {
+                    const txDate = new Date(tx.date);
+                    return (
+                        txDate.getDate() === day &&
+                        txDate.getMonth() === today.getMonth() &&
+                        txDate.getFullYear() === today.getFullYear() &&
+                        tx.type === recurring.type &&
+                        tx.description === recurring.description &&
+                        tx.amount === recurring.amount
+                    );
+                });
+
+                if (!alreadyCharged) {
+                    lease.transactions.push({
+                        date: today,
+                        type: recurring.type,
+                        description: recurring.description,
+                        amount: -Math.abs(recurring.amount)
+                    });
+                    addedCount++;
+                }
+            }
+
+            await lease.save();
+        }
+
+        res.json({ message: `Recurring charges run completed. ${addedCount} charges added.` });
+    } catch (err) {
+        console.error('Error running recurring charges:', err);
+        res.status(500).json({ error: 'Failed to process recurring charges' });
     }
 };

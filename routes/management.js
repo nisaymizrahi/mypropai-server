@@ -27,10 +27,15 @@ router.post('/units/:unitId/lease', auth, managementController.addLeaseToUnit);
 
 // --- Lease Level Routes ---
 
-// NEW: @route   GET /api/management/leases/:leaseId
+// @route   GET /api/management/leases/:leaseId
 // @desc    Get a single lease by its ID
 // @access  Private
 router.get('/leases/:leaseId', auth, managementController.getLeaseById);
 
+// ✅ NEW: Run recurring charges (automated or manual trigger)
+// @route   POST /api/management/recurring/run
+// @desc    Apply today's scheduled recurring charges
+// @access  Private
+router.post('/recurring/run', auth, managementController.runRecurringChargesForToday);
 
 module.exports = router;
