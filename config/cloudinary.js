@@ -12,16 +12,22 @@ cloudinary.config({
 // Configure multer storage engine to use Cloudinary
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
-  params: {
-    folder: 'mypropai_receipts', // A folder name in your Cloudinary account to keep things organized
-    allowed_formats: ['jpg', 'png', 'pdf'], // Allow images and PDFs
-    // A function to generate a unique public ID for each file
-    public_id: (req, file) => {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        // Remove file extension from original name before adding unique suffix
-        const fileName = file.originalname.split('.').slice(0, -1).join('.');
-        return `receipt-${fileName}-${uniqueSuffix}`;
-    },
+  params: (req, file) => {
+    // NEW: This is now a function to dynamically set parameters
+    let folder = 'mypropai_receipts';
+    let resource_type = 'auto'; // Let Cloudinary auto-detect
+
+    // Be more specific for PDFs to ensure they are treated as raw files
+    if (file.mimetype === 'application/pdf') {
+      resource_type = 'raw';
+    }
+
+    return {
+      folder: folder,
+      resource_type: resource_type,
+      allowed_formats: ['jpg', 'png', 'pdf'],
+      public_id: `receipt-${file.originalname.split('.').slice(0, -1).join('.')}-${Date.now()}`
+    };
   },
 });
 
