@@ -1,8 +1,8 @@
 const Investment = require('../models/Investment');
 const ManagedProperty = require('../models/ManagedProperty');
 const Unit = require('../models/Unit');
-const Tenant = require('../models/Tenant'); // NEW: Import Tenant model
-const Lease = require('../models/Lease');   // NEW: Import Lease model
+const Tenant = require('../models/Tenant');
+const Lease = require('../models/Lease');
 
 // @desc    Promote an Investment to a ManagedProperty
 exports.promoteInvestment = async (req, res) => {
@@ -144,15 +144,14 @@ exports.addUnitToProperty = async (req, res) => {
     }
 };
 
-// NEW: @desc   Add a Tenant and a Lease to a specific Unit
+// @desc   Add a Tenant and a Lease to a specific Unit
 exports.addLeaseToUnit = async (req, res) => {
     const { unitId } = req.params;
     const { 
-        fullName, email, phone, contactNotes, // Tenant info
-        startDate, endDate, rentAmount, securityDeposit, leaseNotes // Lease info
+        fullName, email, phone, contactNotes,
+        startDate, endDate, rentAmount, securityDeposit, leaseNotes 
     } = req.body;
 
-    // Basic validation
     if (!fullName || !email || !startDate || !endDate || !rentAmount) {
         return res.status(400).json({ msg: 'Please provide all required tenant and lease information.' });
     }
@@ -166,13 +165,11 @@ exports.addLeaseToUnit = async (req, res) => {
             return res.status(400).json({ msg: 'This unit is already occupied.' });
         }
         
-        // Verify the user owns the parent property
         const property = await ManagedProperty.findById(unit.property);
         if (property.user.toString() !== req.user.id) {
             return res.status(401).json({ msg: 'User not authorized.' });
         }
 
-        // 1. Create the new Tenant
         const newTenant = new Tenant({
             property: unit.property,
             user: req.user.id,
@@ -183,7 +180,6 @@ exports.addLeaseToUnit = async (req, res) => {
         });
         await newTenant.save();
         
-        // 2. Create the new Lease, linking the new Tenant
         const newLease = new Lease({
             unit: unitId,
             tenant: newTenant._id,
@@ -192,11 +188,10 @@ exports.addLeaseToUnit = async (req, res) => {
             rentAmount,
             securityDeposit,
             notes: leaseNotes,
-            transactions: [] // Start with an empty ledger
+            transactions: []
         });
         await newLease.save();
 
-        // 3. Update the Unit to link the new lease and set status to Occupied
         unit.currentLease = newLease._id;
         unit.status = 'Occupied';
         await unit.save();
@@ -205,10 +200,71 @@ exports.addLeaseToUnit = async (req, res) => {
 
     } catch (err) {
         console.error(err.message);
-        // Handle potential duplicate email error for tenants
         if (err.code === 11000) {
             return res.status(400).json({ msg: 'A tenant with this email already exists.' });
         }
+        res.status(500).send('Server Error');
+    }
+};
+
+// @desc    Get a single lease by its ID
+exports.getLeaseById = async (req, res) => {
+    try {
+        const lease = await Lease.findById(req.params.leaseId)
+            .populate('tenant')
+            .populate({
+                path: 'unit',
+                populate: {
+                    path: 'property',
+                    select: 'address user' // Also populate user to verify ownership
+                }
+            });
+
+        if (!lease) {
+            return res.status(404).json({ msg: 'Lease not found' });
+        }
+
+        if (lease.unit.property.user.toString() !== req.user.id) {
+            return res.status(401).json({ msg: 'User not authorized' });
+        }
+
+        res.json(lease);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Server Error');
+    }
+};
+
+// NEW: @desc    Add a transaction to a lease's ledger
+exports.addTransactionToLease = async (req, res) => {
+    const { leaseId } = req.params;
+    const { date, type, description, amount } = req.body;
+
+    if (!date || !type || !amount) {
+        return res.status(400).json({ msg: 'Date, type, and amount are required.' });
+    }
+
+    try {
+        const lease = await Lease.findById(leaseId).populate({
+            path: 'unit',
+            populate: { path: 'property', select: 'user' }
+        });
+
+        if (!lease) {
+            return res.status(404).json({ msg: 'Lease not found.' });
+        }
+        if (lease.unit.property.user.toString() !== req.user.id) {
+            return res.status(401).json({ msg: 'User not authorized.' });
+        }
+
+        lease.transactions.push({ date, type, description, amount: Number(amount) });
+        await lease.save();
+        
+        // Return the newly created transaction
+        res.status(201).json(lease.transactions[lease.transactions.length - 1]);
+
+    } catch (err) {
+        console.error(err.message);
         res.status(500).send('Server Error');
     }
 };

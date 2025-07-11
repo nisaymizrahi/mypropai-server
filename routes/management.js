@@ -3,58 +3,34 @@ const router = express.Router();
 const auth = require('../middleware/requireAuth'); 
 const managementController = require('../controllers/managementController');
 
-// @route   POST /api/management/promote/:investmentId
-// @desc    Promote an existing Investment to a ManagedProperty
-// @access  Private
-router.post(
-  '/promote/:investmentId',
-  auth,
-  managementController.promoteInvestment
-);
+// --- Property Level Routes ---
 
-// @route   GET /api/management
-// @desc    Get all managed properties for the logged-in user
-// @access  Private
-router.get(
-    '/', 
-    auth, 
-    managementController.getManagedProperties
-);
+// Promote an Investment to a ManagedProperty
+router.post('/promote/:investmentId', auth, managementController.promoteInvestment);
 
-// @route   GET /api/management/unmanaged-properties
-// @desc    Get all "rent" type investments that are not yet managed
-// @access  Private
-router.get(
-    '/unmanaged-properties',
-    auth,
-    managementController.getUnmanagedProperties
-);
+// Get all managed properties for the user
+router.get('/', auth, managementController.getManagedProperties);
 
-// @route   GET /api/management/:propertyId
-// @desc    Get a single managed property by ID
-// @access  Private
-router.get(
-    '/:propertyId',
-    auth,
-    managementController.getManagedPropertyById
-);
+// Get all unmanaged "rent" properties for the user
+router.get('/unmanaged-properties', auth, managementController.getUnmanagedProperties);
 
-// @route   POST /api/management/:propertyId/units
-// @desc    Add a new unit to a managed property
-// @access  Private
-router.post(
-    '/:propertyId/units',
-    auth,
-    managementController.addUnitToProperty
-);
+// Get a single managed property by ID
+router.get('/:propertyId', auth, managementController.getManagedPropertyById);
 
-// NEW: @route   POST /api/management/units/:unitId/lease
-// @desc    Add a new tenant and lease to a specific unit
+// --- Unit Level Routes ---
+
+// Add a new unit to a managed property
+router.post('/:propertyId/units', auth, managementController.addUnitToProperty);
+
+// Add a new tenant and lease to a specific unit
+router.post('/units/:unitId/lease', auth, managementController.addLeaseToUnit);
+
+// --- Lease Level Routes ---
+
+// NEW: @route   GET /api/management/leases/:leaseId
+// @desc    Get a single lease by its ID
 // @access  Private
-router.post(
-    '/units/:unitId/lease',
-    auth,
-    managementController.addLeaseToUnit
-);
+router.get('/leases/:leaseId', auth, managementController.getLeaseById);
+
 
 module.exports = router;
