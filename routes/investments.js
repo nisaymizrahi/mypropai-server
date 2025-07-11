@@ -52,7 +52,7 @@ router.patch("/:id", requireAuth, async (req, res) => {
   }
 });
 
-// --- NEW: Route to ADD a new budget line ---
+// POST a new budget line
 router.post("/:id/budget", requireAuth, async (req, res) => {
     try {
         const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
@@ -77,7 +77,6 @@ router.patch("/:id/budget/:index", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "Invalid budget line index" });
     }
     
-    // Update fields provided in the request body
     Object.keys(req.body).forEach(key => {
         investment.budget[index][key] = req.body[key];
     });
@@ -89,7 +88,27 @@ router.patch("/:id/budget/:index", requireAuth, async (req, res) => {
   }
 });
 
-// --- NEW: Route to ADD a new expense ---
+// --- NEW: Route to DELETE a specific budget line by index ---
+router.delete("/:id/budget/:index", requireAuth, async (req, res) => {
+  try {
+    const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
+    if (!investment) return res.status(404).json({ message: "Investment not found" });
+
+    const index = parseInt(req.params.index);
+    if (!investment.budget || index < 0 || index >= investment.budget.length) {
+      return res.status(400).json({ message: "Invalid budget line index" });
+    }
+
+    investment.budget.splice(index, 1);
+    await investment.save();
+    res.json(investment);
+  } catch (err) {
+    console.error("Delete budget line error:", err);
+    res.status(500).json({ error: "Failed to delete budget line" });
+  }
+});
+
+// POST a new expense
 router.post("/:id/expenses", requireAuth, async (req, res) => {
     try {
         const investment = await Investment.findOne({ _id: req.params.id, user: req.userId });
