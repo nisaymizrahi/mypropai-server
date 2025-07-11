@@ -8,7 +8,8 @@ const expenseSchema = new mongoose.Schema({
   vendor: { type: String },
   notes: { type: String },
   receiptUrl: { type: String },
-  date: { type: Date, default: Date.now }, // This is for renovation expenses
+  // UPDATED: Now required, to ensure a user-set date is always provided.
+  date: { type: Date, required: true }, 
 });
 
 // A sub-schema for budget line items.
@@ -21,6 +22,11 @@ const budgetSchema = new mongoose.Schema({
     enum: ["Not Started", "In Progress", "Completed"],
     default: "Not Started",
   },
+  // NEW: Added a date field to track when budget items are created.
+  date: {
+      type: Date,
+      default: Date.now
+  }
 });
 
 // The main investment schema, now with a comprehensive analysis structure.
@@ -90,8 +96,12 @@ const investmentSchema = new mongoose.Schema(
         otherMonthlyCosts: { type: Number, default: 0 }
     },
     
-    // NEW: Link to the property management system
-    managedPropertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'ManagedProperty' }
+    // UPDATED: Link to the property management system, standardized name.
+    managedProperty: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: 'ManagedProperty',
+      default: null 
+    }
   },
   { timestamps: true }
 );
