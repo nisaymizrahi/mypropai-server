@@ -1,187 +1,67 @@
+// ... (All other functions like promoteInvestment, addLeaseToUnit, etc. remain the same) ...
+
 const Investment = require('../models/Investment');
 const ManagedProperty = require('../models/ManagedProperty');
 const Unit = require('../models/Unit');
 const Tenant = require('../models/Tenant');
 const Lease = require('../models/Lease');
 
-// This function is correct and does not need changes.
-exports.promoteInvestment = async (req, res) => {
-  try {
-    const investment = await Investment.findById(req.params.investmentId);
-    if (!investment) return res.status(404).json({ msg: 'Investment not found' });
-    if (investment.user.toString() !== req.user.id) return res.status(401).json({ msg: 'User not authorized' });
-    if (investment.type !== 'rent') return res.status(400).json({ msg: 'Only "Fix and Rent" properties can be managed.' });
-    if (investment.managedProperty) return res.status(400).json({ msg: 'This property is already being managed.' });
+// --- Keep all your other controller functions above this line ---
+// promoteInvestment, getManagedProperties, getUnmanagedProperties, etc.
 
-    const managedProperty = new ManagedProperty({
-      investment: investment._id,
-      user: req.user.id,
-      address: investment.address,
-    });
-    
-    const defaultUnit = new Unit({
-        property: managedProperty._id,
-        name: investment.unitCount > 1 ? 'Unit 1' : 'Main Unit',
-        status: 'Vacant'
-    });
 
-    managedProperty.units.push(defaultUnit._id);
-    investment.managedProperty = managedProperty._id;
-
-    await managedProperty.save();
-    await defaultUnit.save();
-    await investment.save();
-    res.status(201).json(managedProperty);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).send('Server Error');
-  }
-};
-
-// This function is correct and does not need changes.
-exports.getManagedProperties = async (req, res) => {
-  try {
-    const properties = await ManagedProperty.find({ user: req.user.id }).populate('units').sort({ createdAt: -1 });
-    res.json(properties);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).send('Server Error');
-  }
-};
-
-// This function is correct and does not need changes.
-exports.getUnmanagedProperties = async (req, res) => {
-    try {
-        const unmanaged = await Investment.find({ user: req.user.id, type: 'rent', managedProperty: null }).select('address');
-        res.json(unmanaged);
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
-    }
-};
-
-// This function is correct and does not need changes.
-exports.getManagedPropertyById = async (req, res) => {
-    try {
-        const property = await ManagedProperty.findById(req.params.propertyId)
-            .populate({ path: 'units', populate: { path: 'currentLease', populate: { path: 'tenant' } } })
-            .populate('investment');
-        if (!property) return res.status(404).json({ msg: 'Property not found' });
-        if (property.user.toString() !== req.user.id) return res.status(401).json({ msg: 'User not authorized' });
-        res.json(property);
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
-    }
-};
-
-// This function is correct and does not need changes.
-exports.addUnitToProperty = async (req, res) => {
-    const { name, beds, baths, sqft } = req.body;
-    try {
-        const property = await ManagedProperty.findById(req.params.propertyId);
-        if (!property) return res.status(404).json({ msg: 'Property not found' });
-        if (property.user.toString() !== req.user.id) return res.status(401).json({ msg: 'User not authorized' });
-        const newUnit = new Unit({ property: req.params.propertyId, name, beds, baths, sqft, status: 'Vacant' });
-        await newUnit.save();
-        property.units.push(newUnit._id);
-        await property.save();
-        res.status(201).json(newUnit);
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
-    }
-};
-
-// This function is correct and does not need changes.
-exports.addLeaseToUnit = async (req, res) => {
-    const { unitId } = req.params;
-    const { fullName, email, phone, contactNotes, startDate, endDate, rentAmount, securityDeposit, leaseNotes } = req.body;
-
-    if (!fullName || !email || !startDate || !endDate || !rentAmount) {
-        return res.status(400).json({ msg: 'Please provide all required tenant and lease information.' });
-    }
-    try {
-        const unit = await Unit.findById(unitId);
-        if (!unit) return res.status(404).json({ msg: 'Unit not found.' });
-        if (unit.status !== 'Vacant') return res.status(400).json({ msg: 'This unit is already occupied.' });
-        
-        const property = await ManagedProperty.findById(unit.property);
-        if (property.user.toString() !== req.user.id) return res.status(401).json({ msg: 'User not authorized.' });
-
-        const newTenant = new Tenant({ property: unit.property, user: req.user.id, fullName, email, phone, contactNotes });
-        await newTenant.save();
-        
-        const newLease = new Lease({ unit: unitId, tenant: newTenant._id, startDate, endDate, rentAmount, securityDeposit, notes: leaseNotes, transactions: [] });
-        await newLease.save();
-
-        unit.currentLease = newLease._id;
-        unit.status = 'Occupied';
-        await unit.save();
-        res.status(201).json({ tenant: newTenant, lease: newLease });
-    } catch (err) {
-        console.error(err.message);
-        if (err.code === 11000) return res.status(400).json({ msg: 'A tenant with this email already exists.' });
-        res.status(500).send('Server Error');
-    }
-};
-
-// @desc    Get a single lease by its ID
-// UPDATED with the final, robust authorization check.
+// @desc    Get a single lease by its ID (DEBUGGING VERSION)
 exports.getLeaseById = async (req, res) => {
     try {
-        const lease = await Lease.findById(req.params.leaseId)
-            .populate({ 
-                path: 'tenant',
-                // We ensure the tenant being populated belongs to the logged-in user.
-                match: { user: req.user.id } 
-            })
-            .populate({
-                path: 'unit',
-                populate: { path: 'property', select: 'address' }
-            });
+        console.log(`--- DEBUG: Fetching Lease ID: ${req.params.leaseId} ---`);
 
-        // If the lease doesn't exist OR if the tenant was not populated (because the user ID didn't match),
-        // then the request is not authorized.
-        if (!lease || !lease.tenant) {
-            return res.status(401).json({ msg: 'Not authorized or lease not found' });
-        }
-
-        res.json(lease);
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
-    }
-};
-
-// @desc    Add a transaction to a lease's ledger
-// UPDATED with the final, robust authorization check.
-exports.addTransactionToLease = async (req, res) => {
-    const { leaseId } = req.params;
-    const { date, type, description, amount } = req.body;
-
-    if (!date || !type || !amount) {
-        return res.status(400).json({ msg: 'Date, type, and amount are required.' });
-    }
-    try {
-        const lease = await Lease.findById(leaseId).populate('tenant');
+        const lease = await Lease.findById(req.params.leaseId).populate('tenant');
 
         if (!lease) {
-            return res.status(404).json({ msg: 'Lease not found.' });
+            console.log('--- DEBUG: Lease not found in database. ---');
+            return res.status(404).json({ msg: 'Lease not found' });
         }
-
-        // Direct and simple authorization check.
-        if (lease.tenant.user.toString() !== req.user.id) {
-            return res.status(401).json({ msg: 'User not authorized.' });
-        }
-
-        lease.transactions.push({ date, type, description, amount: Number(amount) });
-        await lease.save();
         
-        res.status(201).json(lease.transactions[lease.transactions.length - 1]);
+        // Let's log everything to see what the server sees
+        console.log('--- DEBUG: Found Lease Object ---');
+        console.log(JSON.stringify(lease, null, 2));
+
+        if (!lease.tenant) {
+            console.log('--- DEBUG: ERROR - Tenant not populated on the lease. ---');
+            return res.status(500).json({ msg: 'Server error: Tenant data missing.' });
+        }
+
+        console.log(`--- DEBUG: Comparing IDs ---`);
+        console.log(`Logged-in user (req.user.id):     '${req.user.id}'`);
+        console.log(`Lease tenant's owner (lease.tenant.user): '${lease.tenant.user}'`);
+
+        // This is the authorization check
+        if (lease.tenant.user.toString() !== req.user.id) {
+            console.log('--- DEBUG: Authorization FAILED. IDs do not match. ---');
+            return res.status(401).json({ msg: 'User not authorized' });
+        }
+
+        console.log('--- DEBUG: Authorization SUCCEEDED. ---');
+        
+        // If authorization passes, we still need to populate the rest for the frontend
+        const finalLease = await Lease.findById(req.params.leaseId)
+            .populate('tenant')
+            .populate({
+                path: 'unit',
+                populate: {
+                    path: 'property',
+                    select: 'address'
+                }
+            });
+
+        res.json(finalLease);
 
     } catch (err) {
-        console.error(err.message);
+        console.error('--- DEBUG: CRASH in getLeaseById ---', err);
         res.status(500).send('Server Error');
     }
 };
+
+// --- Keep all your other controller functions below this line ---
+
+// All other exports like addTransactionToLease should be here...
