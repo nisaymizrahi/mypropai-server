@@ -1,17 +1,17 @@
 const mongoose = require("mongoose");
 
-// NEW: A sub-schema for more detailed expense tracking.
+// A sub-schema for more detailed expense tracking.
 const expenseSchema = new mongoose.Schema({
   description: { type: String, required: true },
   category: { type: String, required: true },
   amount: { type: Number, required: true },
   vendor: { type: String },
   notes: { type: String },
-  receiptUrl: { type: String }, // To store the link to the uploaded document
+  receiptUrl: { type: String },
   date: { type: Date, default: Date.now },
 });
 
-// NEW: A sub-schema for budget line items.
+// A sub-schema for budget line items.
 const budgetSchema = new mongoose.Schema({
   category: { type: String, required: true },
   description: { type: String },
@@ -23,7 +23,7 @@ const budgetSchema = new mongoose.Schema({
   },
 });
 
-// The main investment schema, now with much more detail.
+// The main investment schema, now with a comprehensive analysis structure.
 const investmentSchema = new mongoose.Schema(
   {
     user: {
@@ -51,7 +51,7 @@ const investmentSchema = new mongoose.Schema(
     budget: [budgetSchema],
     expenses: [expenseSchema],
 
-    // NEW: Deal Analysis section for "soft costs"
+    // Deal Analysis section for "soft costs" common to both deal types
     dealAnalysis: {
       buyingCosts: { type: Number, default: 0 },
       sellingCosts: {
@@ -62,15 +62,35 @@ const investmentSchema = new mongoose.Schema(
           monthlyAmount: { type: Number, default: 0 },
           durationMonths: { type: Number, default: 6 }
       },
-      financingCosts: { type: Number, default: 0 }
+      financingCosts: { type: Number, default: 0 } // For the initial purchase loan
     },
 
-    // NEW: Financing Details section
+    // NEW: Expanded financing details for both purchase and refinance
     financingDetails: {
-      useFinancing: { type: Boolean, default: false },
-      loanAmount: { type: Number, default: 0 },
-      interestRate: { type: Number, default: 0 },
-      loanTerm: { type: Number, default: 30 }, // In years
+      purchaseLoan: {
+        loanAmount: { type: Number, default: 0 },
+        interestRate: { type: Number, default: 0 },
+        loanTerm: { type: Number, default: 30 },
+      },
+      refinanceLoan: {
+        loanAmount: { type: Number, default: 0 },
+        interestRate: { type: Number, default: 0 },
+        loanTerm: { type: Number, default: 30 },
+      }
+    },
+
+    // NEW: Rental-Specific Operating Expenses for long-term analysis
+    rentalAnalysis: {
+        // Inputs as percentages of monthly rent
+        vacancyRate: { type: Number, default: 5 },
+        repairsMaintenanceRate: { type: Number, default: 5 },
+        capitalExpendituresRate: { type: Number, default: 5 },
+        managementFeeRate: { type: Number, default: 8 },
+        // Inputs as fixed annual amounts
+        propertyTaxes: { type: Number, default: 0 },
+        insurance: { type: Number, default: 0 },
+        // Other fixed monthly costs
+        otherMonthlyCosts: { type: Number, default: 0 }
     }
   },
   { timestamps: true }
