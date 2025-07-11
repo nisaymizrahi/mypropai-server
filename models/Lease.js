@@ -65,4 +65,3 @@ const LeaseSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 module.exports = mongoose.model('Lease', LeaseSchema);
-s
