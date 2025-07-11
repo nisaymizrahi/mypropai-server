@@ -6,6 +6,17 @@ const session = require("express-session");
 const cookieParser = require("cookie-parser");
 const connectDB = require("./config/db");
 
+// --- NEW: Register all database models on startup ---
+// By requiring them here, we ensure Mongoose is aware of every schema.
+require('./models/User'); // Assuming you have a User model
+require('./models/Investment');
+require('./models/ManagedProperty');
+require('./models/Unit');
+require('./models/Tenant');
+require('./models/Lease');
+require('./models/OperatingExpense');
+// --- End of Model Registration ---
+
 const investmentRoutes = require("./routes/investments");
 const authRoutes = require("./routes/auth");
 const compsRoutes = require("./routes/comps");
@@ -18,9 +29,8 @@ require("./config/passport");
 const app = express();
 connectDB();
 
-// --- NEW: CORS Configuration for Development and Production ---
+// CORS Configuration for Development and Production
 const allowedOrigins = ["https://mypropai.onrender.com"];
-// If we are not in a production environment, allow localhost for development
 if (process.env.NODE_ENV !== 'production') {
   allowedOrigins.push('http://localhost:3000');
 }
@@ -28,21 +38,17 @@ if (process.env.NODE_ENV !== 'production') {
 app.use(
   cors({
     origin: function (origin, callback) {
-      // allow requests with no origin (like mobile apps or curl requests)
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.indexOf(origin) === -1) {
-        const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-        return callback(new Error(msg), false);
+      if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error('The CORS policy for this site does not allow access from the specified Origin.'));
       }
-      return callback(null, true);
     },
     credentials: true,
     allowedHeaders: ["Authorization", "Content-Type"],
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   })
 );
-// --- End of CORS Configuration ---
-
 
 app.use(express.json());
 app.use(cookieParser());
