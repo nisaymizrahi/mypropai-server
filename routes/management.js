@@ -38,6 +38,12 @@ router.get('/leases/:leaseId', auth, managementController.getLeaseById);
 // @access  Private
 router.post('/leases/:leaseId/transactions', auth, managementController.addTransactionToLease);
 
+// ✅ NEW: Update lease (e.g. add recurring charges)
+// @route   PATCH /api/management/leases/:leaseId
+// @desc    Update lease fields like recurringCharges
+// @access  Private
+router.patch('/leases/:leaseId', auth, managementController.updateLease);
+
 // ✅ NEW: Run recurring charges (automated or manual trigger)
 // @route   POST /api/management/recurring/run
 // @desc    Apply today's scheduled recurring charges
