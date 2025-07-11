@@ -8,7 +8,7 @@ const expenseSchema = new mongoose.Schema({
   vendor: { type: String },
   notes: { type: String },
   receiptUrl: { type: String },
-  date: { type: Date, default: Date.now },
+  date: { type: Date, default: Date.now }, // This is for renovation expenses
 });
 
 // A sub-schema for budget line items.
@@ -62,10 +62,10 @@ const investmentSchema = new mongoose.Schema(
           monthlyAmount: { type: Number, default: 0 },
           durationMonths: { type: Number, default: 6 }
       },
-      financingCosts: { type: Number, default: 0 } // For the initial purchase loan
+      financingCosts: { type: Number, default: 0 }
     },
 
-    // NEW: Expanded financing details for both purchase and refinance
+    // Expanded financing details for both purchase and refinance
     financingDetails: {
       purchaseLoan: {
         loanAmount: { type: Number, default: 0 },
@@ -79,19 +79,19 @@ const investmentSchema = new mongoose.Schema(
       }
     },
 
-    // NEW: Rental-Specific Operating Expenses for long-term analysis
+    // Rental-Specific Operating Expenses for long-term analysis
     rentalAnalysis: {
-        // Inputs as percentages of monthly rent
         vacancyRate: { type: Number, default: 5 },
         repairsMaintenanceRate: { type: Number, default: 5 },
         capitalExpendituresRate: { type: Number, default: 5 },
         managementFeeRate: { type: Number, default: 8 },
-        // Inputs as fixed annual amounts
         propertyTaxes: { type: Number, default: 0 },
         insurance: { type: Number, default: 0 },
-        // Other fixed monthly costs
         otherMonthlyCosts: { type: Number, default: 0 }
-    }
+    },
+    
+    // NEW: Link to the property management system
+    managedPropertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'ManagedProperty' }
   },
   { timestamps: true }
 );
