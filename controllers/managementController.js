@@ -236,7 +236,7 @@ exports.runRecurringChargesForToday = async (req, res) => {
   }
 };
 
-// ✅ NEW: Update lease (e.g. to add recurring charges)
+// ✅ Updated: PATCH /leases/:leaseId to add recurring charges safely
 exports.updateLease = async (req, res) => {
   try {
     const lease = await Lease.findById(req.params.leaseId).populate('tenant');
@@ -244,14 +244,42 @@ exports.updateLease = async (req, res) => {
       return res.status(401).json({ msg: 'Unauthorized' });
     }
 
-    if (req.body.recurringCharges) {
-      lease.recurringCharges = [...(lease.recurringCharges || []), ...req.body.recurringCharges];
+    const charges = req.body.recurringCharges;
+
+    if (!Array.isArray(charges)) {
+      return res.status(400).json({ msg: 'recurringCharges must be an array' });
     }
 
+    // Validate each charge
+    for (const charge of charges) {
+      if (
+        typeof charge.dayOfMonth !== 'number' ||
+        charge.dayOfMonth < 1 || charge.dayOfMonth > 28
+      ) {
+        return res.status(400).json({ msg: 'Invalid dayOfMonth (must be 1–28)' });
+      }
+
+      const allowedTypes = ['Rent Charge', 'Late Fee', 'Pet Fee', 'Renters Insurance', 'Utility Fee', 'Parking Fee', 'Other Charge'];
+      if (!allowedTypes.includes(charge.type)) {
+        return res.status(400).json({ msg: `Invalid type: ${charge.type}` });
+      }
+
+      if (typeof charge.description !== 'string' || !charge.description.trim()) {
+        return res.status(400).json({ msg: 'Description is required' });
+      }
+
+      if (typeof charge.amount !== 'number' || isNaN(charge.amount)) {
+        return res.status(400).json({ msg: 'Amount must be a number' });
+      }
+    }
+
+    lease.recurringCharges = [...(lease.recurringCharges || []), ...charges];
     await lease.save();
+
     res.status(200).json(lease);
   } catch (err) {
-    console.error(err.message);
+    console.error('Update Lease Error:', err);
     res.status(500).json({ msg: 'Server error updating lease' });
   }
 };
+
