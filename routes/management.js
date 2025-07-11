@@ -39,13 +39,22 @@ router.get(
     managementController.getManagedPropertyById
 );
 
-// NEW: @route   POST /api/management/:propertyId/units
+// @route   POST /api/management/:propertyId/units
 // @desc    Add a new unit to a managed property
 // @access  Private
 router.post(
     '/:propertyId/units',
     auth,
     managementController.addUnitToProperty
+);
+
+// NEW: @route   POST /api/management/units/:unitId/lease
+// @desc    Add a new tenant and lease to a specific unit
+// @access  Private
+router.post(
+    '/units/:unitId/lease',
+    auth,
+    managementController.addLeaseToUnit
 );
 
 module.exports = router;
