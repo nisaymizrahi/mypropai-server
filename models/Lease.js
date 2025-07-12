@@ -1,66 +1,60 @@
 const mongoose = require('mongoose');
 
-// This sub-schema defines a single line item in the tenant's financial ledger.
+// Financial ledger sub-schema
 const TransactionSchema = new mongoose.Schema({
-  date: { 
-    type: Date, 
-    default: Date.now 
-  },
-  type: { 
-    type: String, 
-    enum: ['Rent Charge', 'Rent Payment', 'Late Fee', 'Other Credit', 'Other Charge'], 
-    required: true 
+  date: { type: Date, default: Date.now },
+  type: {
+    type: String,
+    enum: ['Rent Charge', 'Rent Payment', 'Late Fee', 'Other Credit', 'Other Charge'],
+    required: true
   },
   description: String,
-  // Amount is stored in cents to avoid floating point issues.
-  // Negative for charges (rent, fees), Positive for payments/credits.
-  amount: {
-      type: Number,
-      required: true
-  }
+  amount: { type: Number, required: true } // cents
 });
 
-// NEW: Sub-schema for recurring charges
+// Recurring charges sub-schema
 const RecurringChargeSchema = new mongoose.Schema({
-  dayOfMonth: { type: Number, min: 1, max: 28, required: true }, // safe for every month
-  type: { 
-    type: String, 
-    enum: ['Rent Charge', 'Late Fee', 'Other Charge'], 
-    required: true 
+  dayOfMonth: { type: Number, min: 1, max: 28, required: true },
+  type: {
+    type: String,
+    enum: ['Rent Charge', 'Late Fee', 'Other Charge'],
+    required: true
   },
   description: { type: String, required: true },
-  amount: { type: Number, required: true } // stored in cents
+  amount: { type: Number, required: true } // cents
+});
+
+// ✅ NEW: Client communication schema
+const CommunicationSchema = new mongoose.Schema({
+  date: { type: Date, default: Date.now },
+  subject: { type: String, required: true },
+  notes: { type: String },
+  category: {
+    type: String,
+    enum: ['Maintenance', 'General Inquiry', 'Payment Issue', 'Other'],
+    default: 'Other'
+  },
+  attachmentUrl: { type: String } // optional link to uploaded file
 });
 
 const LeaseSchema = new mongoose.Schema({
-  // The unit this lease is for
-  unit: { 
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Unit',
-    required: true
-  },
-  // The tenant associated with this lease
-  tenant: { 
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Tenant',
-    required: true
-  },
-  // Core lease terms
+  unit: { type: mongoose.Schema.Types.ObjectId, ref: 'Unit', required: true },
+  tenant: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
+
   startDate: { type: Date, required: true },
   endDate: { type: Date, required: true },
   rentAmount: { type: Number, required: true },
   securityDeposit: { type: Number, default: 0 },
 
-  // Status and document tracking
   isActive: { type: Boolean, default: true },
-  leaseDocumentUrl: String, // For uploading the signed lease PDF
+  leaseDocumentUrl: String,
   notes: String,
 
-  // The financial ledger for this specific lease
   transactions: [TransactionSchema],
+  recurringCharges: [RecurringChargeSchema],
 
-  // ✅ NEW: Recurring charges to auto-apply each month
-  recurringCharges: [RecurringChargeSchema]
+  // ✅ NEW: Client communications
+  communications: [CommunicationSchema]
 
 }, { timestamps: true });
 

@@ -301,4 +301,64 @@ exports.updateLease = async (req, res) => {
   }
 };
 
+// @desc    Get all communications for a lease
+exports.getCommunicationsForLease = async (req, res) => {
+  try {
+    const lease = await Lease.findById(req.params.leaseId).populate('tenant');
+    if (!lease || lease.tenant.user.toString() !== req.user.id) {
+      return res.status(401).json({ msg: 'Unauthorized' });
+    }
 
+    res.json(lease.communications || []);
+  } catch (err) {
+    console.error('Error fetching communications:', err);
+    res.status(500).json({ msg: 'Server error fetching communications' });
+  }
+};
+
+// @desc    Add a communication entry to a lease
+exports.addCommunicationToLease = async (req, res) => {
+  try {
+    const lease = await Lease.findById(req.params.leaseId).populate('tenant');
+    if (!lease || lease.tenant.user.toString() !== req.user.id) {
+      return res.status(401).json({ msg: 'Unauthorized' });
+    }
+
+    const { subject, notes, category, attachmentUrl } = req.body;
+    if (!subject) return res.status(400).json({ msg: 'Subject is required' });
+
+    const newEntry = {
+      subject,
+      notes,
+      category: category || 'Other',
+      attachmentUrl
+    };
+
+    lease.communications.push(newEntry);
+    await lease.save();
+
+    res.status(201).json(lease.communications[lease.communications.length - 1]);
+  } catch (err) {
+    console.error('Error adding communication:', err);
+    res.status(500).json({ msg: 'Server error adding communication' });
+  }
+};
+
+// @desc    Delete a specific communication from a lease
+exports.deleteCommunicationFromLease = async (req, res) => {
+  try {
+    const lease = await Lease.findById(req.params.leaseId).populate('tenant');
+    if (!lease || lease.tenant.user.toString() !== req.user.id) {
+      return res.status(401).json({ msg: 'Unauthorized' });
+    }
+
+    const { commId } = req.params;
+    lease.communications = lease.communications.filter(comm => comm._id.toString() !== commId);
+
+    await lease.save();
+    res.json({ msg: 'Communication deleted' });
+  } catch (err) {
+    console.error('Error deleting communication:', err);
+    res.status(500).json({ msg: 'Server error deleting communication' });
+  }
+};

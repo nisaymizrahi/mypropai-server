@@ -27,27 +27,27 @@ router.post('/units/:unitId/lease', auth, managementController.addLeaseToUnit);
 
 // --- Lease Level Routes ---
 
-// @route   GET /api/management/leases/:leaseId
-// @desc    Get a single lease by its ID
-// @access  Private
+// Get a single lease by ID
 router.get('/leases/:leaseId', auth, managementController.getLeaseById);
 
-// ✅ NEW: Save one-time payment or charge
-// @route   POST /api/management/leases/:leaseId/transactions
-// @desc    Add a transaction to a lease ledger
-// @access  Private
+// Add a transaction to a lease
 router.post('/leases/:leaseId/transactions', auth, managementController.addTransactionToLease);
 
-// ✅ NEW: Update lease (e.g. add recurring charges)
-// @route   PATCH /api/management/leases/:leaseId
-// @desc    Update lease fields like recurringCharges
-// @access  Private
+// Update lease fields (recurring charges, tenant info, etc.)
 router.patch('/leases/:leaseId', auth, managementController.updateLease);
 
-// ✅ NEW: Run recurring charges (automated or manual trigger)
-// @route   POST /api/management/recurring/run
-// @desc    Apply today's scheduled recurring charges
-// @access  Private
+// Run recurring charges manually
 router.post('/recurring/run', auth, managementController.runRecurringChargesForToday);
+
+// --- ✅ Communication Routes ---
+
+// Get all communications for a lease
+router.get('/leases/:leaseId/communications', auth, managementController.getCommunicationsForLease);
+
+// Add a communication entry
+router.post('/leases/:leaseId/communications', auth, managementController.addCommunicationToLease);
+
+// Delete a specific communication
+router.delete('/leases/:leaseId/communications/:commId', auth, managementController.deleteCommunicationFromLease);
 
 module.exports = router;
