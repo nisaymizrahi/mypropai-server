@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const auth = require('../middleware/requireAuth'); 
+const auth = require('../middleware/requireAuth');
+const upload = require('../middleware/upload'); // <-- 1. IMPORT UPLOAD MIDDLEWARE
 const managementController = require('../controllers/managementController');
 
 // --- Property Level Routes ---
@@ -44,8 +45,21 @@ router.post('/recurring/run', auth, managementController.runRecurringChargesForT
 // Get all communications for a lease
 router.get('/leases/:leaseId/communications', auth, managementController.getCommunicationsForLease);
 
-// Add a communication entry
-router.post('/leases/:leaseId/communications', auth, managementController.addCommunicationToLease);
+// 2. MODIFY Add communication route to accept a single file named 'attachment'
+router.post(
+  '/leases/:leaseId/communications',
+  auth,
+  upload.single('attachment'),
+  managementController.addCommunicationToLease
+);
+
+// 3. ADD a new route to update a communication's status
+router.patch(
+    '/leases/:leaseId/communications/:commId',
+    auth,
+    managementController.updateCommunicationStatus
+);
+
 
 // Delete a specific communication
 router.delete('/leases/:leaseId/communications/:commId', auth, managementController.deleteCommunicationFromLease);

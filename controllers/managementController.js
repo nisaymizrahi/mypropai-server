@@ -316,7 +316,8 @@ exports.getCommunicationsForLease = async (req, res) => {
   }
 };
 
-// @desc    Add a communication entry to a lease
+// 1. THIS FUNCTION IS REPLACED
+// @desc    Add a communication entry to a lease (with optional file upload)
 exports.addCommunicationToLease = async (req, res) => {
   try {
     const lease = await Lease.findById(req.params.leaseId).populate('tenant');
@@ -324,15 +325,21 @@ exports.addCommunicationToLease = async (req, res) => {
       return res.status(401).json({ msg: 'Unauthorized' });
     }
 
-    const { subject, notes, category, attachmentUrl } = req.body;
+    const { subject, notes, category } = req.body;
     if (!subject) return res.status(400).json({ msg: 'Subject is required' });
 
     const newEntry = {
       subject,
       notes,
       category: category || 'Other',
-      attachmentUrl
+      // status will be set by default in the schema
     };
+
+    // If a file was uploaded by multer, add its details to the entry
+    if (req.file) {
+      newEntry.attachmentUrl = req.file.path; // URL from Cloudinary
+      newEntry.attachmentCloudinaryId = req.file.filename; // Public ID from Cloudinary
+    }
 
     lease.communications.push(newEntry);
     await lease.save();
@@ -344,6 +351,42 @@ exports.addCommunicationToLease = async (req, res) => {
   }
 };
 
+// 2. THIS FUNCTION IS NEW
+// @desc    Update the status of a specific communication
+exports.updateCommunicationStatus = async (req, res) => {
+  try {
+    const { leaseId, commId } = req.params;
+    const { status } = req.body;
+
+    // Validate the status against the schema enum
+    const allowedStatuses = ['Not Started', 'In Progress', 'Finished', 'Closed'];
+    if (!status || !allowedStatuses.includes(status)) {
+      return res.status(400).json({ msg: 'Invalid status provided.' });
+    }
+
+    const lease = await Lease.findById(leaseId).populate('tenant');
+    if (!lease || lease.tenant.user.toString() !== req.user.id) {
+      return res.status(401).json({ msg: 'Unauthorized' });
+    }
+
+    // Find the specific communication sub-document by its ID
+    const communication = lease.communications.id(commId);
+    if (!communication) {
+      return res.status(404).json({ msg: 'Communication entry not found.' });
+    }
+
+    // Update its status and save the parent document
+    communication.status = status;
+    await lease.save();
+
+    res.json(communication);
+  } catch (err) {
+    console.error('Error updating communication status:', err);
+    res.status(500).json({ msg: 'Server error updating status' });
+  }
+};
+
+
 // @desc    Delete a specific communication from a lease
 exports.deleteCommunicationFromLease = async (req, res) => {
   try {
@@ -353,6 +396,11 @@ exports.deleteCommunicationFromLease = async (req, res) => {
     }
 
     const { commId } = req.params;
+    
+    // We can add logic here later to delete file from Cloudinary if it exists
+    // const communicationToDelete = lease.communications.id(commId);
+    // if (communicationToDelete && communicationToDelete.attachmentCloudinaryId) { ... }
+
     lease.communications = lease.communications.filter(comm => comm._id.toString() !== commId);
 
     await lease.save();

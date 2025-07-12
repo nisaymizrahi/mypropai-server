@@ -24,7 +24,7 @@ const RecurringChargeSchema = new mongoose.Schema({
   amount: { type: Number, required: true } // cents
 });
 
-// ✅ NEW: Client communication schema
+// ✅ UPDATED: Client communication schema
 const CommunicationSchema = new mongoose.Schema({
   date: { type: Date, default: Date.now },
   subject: { type: String, required: true },
@@ -34,7 +34,14 @@ const CommunicationSchema = new mongoose.Schema({
     enum: ['Maintenance', 'General Inquiry', 'Payment Issue', 'Other'],
     default: 'Other'
   },
-  attachmentUrl: { type: String } // optional link to uploaded file
+  // --- Fields for status and attachments ---
+  status: {
+    type: String,
+    enum: ['Not Started', 'In Progress', 'Finished', 'Closed'],
+    default: 'Not Started'
+  },
+  attachmentUrl: { type: String }, // optional link to uploaded file
+  attachmentCloudinaryId: { type: String } // To allow for deletion from Cloudinary
 });
 
 const LeaseSchema = new mongoose.Schema({
@@ -53,7 +60,7 @@ const LeaseSchema = new mongoose.Schema({
   transactions: [TransactionSchema],
   recurringCharges: [RecurringChargeSchema],
 
-  // ✅ NEW: Client communications
+  // ✅ Client communications
   communications: [CommunicationSchema]
 
 }, { timestamps: true });
