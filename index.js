@@ -7,14 +7,14 @@ const cookieParser = require("cookie-parser");
 const connectDB = require("./config/db");
 
 // --- NEW: Register all database models on startup ---
-// By requiring them here, we ensure Mongoose is aware of every schema.
-require('./models/User'); // Assuming you have a User model
+require('./models/User'); 
 require('./models/Investment');
 require('./models/ManagedProperty');
 require('./models/Unit');
 require('./models/Tenant');
 require('./models/Lease');
 require('./models/OperatingExpense');
+require('./models/TenantUser');
 // --- End of Model Registration ---
 
 const investmentRoutes = require("./routes/investments");
@@ -22,6 +22,9 @@ const authRoutes = require("./routes/auth");
 const compsRoutes = require("./routes/comps");
 const uploadRoutes = require("./routes/uploads");
 const managementRoutes = require("./routes/management");
+const tenantAuthRoutes = require("./routes/tenantAuthRoutes");
+// 1. IMPORT THE NEW TENANT ROUTES
+const tenantRoutes = require("./routes/tenantRoutes"); 
 const requireAuth = require("./middleware/requireAuth");
 
 require("./config/passport");
@@ -29,7 +32,7 @@ require("./config/passport");
 const app = express();
 connectDB();
 
-// CORS Configuration for Development and Production
+// CORS Configuration
 const allowedOrigins = ["https://mypropai.onrender.com"];
 if (process.env.NODE_ENV !== 'production') {
   allowedOrigins.push('http://localhost:3000');
@@ -70,6 +73,10 @@ app.use("/api/investments", requireAuth, investmentRoutes);
 app.use("/api/comps", requireAuth, compsRoutes);
 app.use("/api/uploads", requireAuth, uploadRoutes);
 app.use("/api/management", requireAuth, managementRoutes);
+app.use("/api/tenant-auth", tenantAuthRoutes);
+// 2. USE THE NEW TENANT ROUTES
+app.use("/api/tenant", tenantRoutes);
+
 
 // Start server
 const PORT = process.env.PORT || 5001;

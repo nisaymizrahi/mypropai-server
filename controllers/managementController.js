@@ -4,6 +4,10 @@ const Unit = require('../models/Unit');
 const Tenant = require('../models/Tenant');
 const Lease = require('../models/Lease');
 const cloudinary = require('cloudinary').v2;
+// 1. ADD NEW IMPORTS
+const TenantUser = require('../models/TenantUser');
+const crypto = require('crypto');
+
 
 // @desc    Promote an Investment to a ManagedProperty
 exports.promoteInvestment = async (req, res) => {
@@ -95,6 +99,7 @@ exports.addUnitToProperty = async (req, res) => {
 };
 
 // @desc   Add a Tenant and a Lease to a specific Unit
+// 2. THIS ENTIRE FUNCTION IS REPLACED
 exports.addLeaseToUnit = async (req, res) => {
   const { unitId } = req.params;
   const { fullName, email, phone, contactNotes, startDate, endDate, rentAmount, securityDeposit, leaseNotes } = req.body;
@@ -102,6 +107,13 @@ exports.addLeaseToUnit = async (req, res) => {
   if (!fullName || !email || !startDate || !endDate || !rentAmount) {
     return res.status(400).json({ msg: 'Please provide all required tenant and lease information.' });
   }
+
+  // Check if a tenant login already exists with this email
+  const existingTenantUser = await TenantUser.findOne({ email });
+  if (existingTenantUser) {
+    return res.status(400).json({ msg: 'A tenant login account with this email already exists.' });
+  }
+
   try {
     const unit = await Unit.findById(unitId);
     if (!unit) return res.status(404).json({ msg: 'Unit not found.' });
@@ -112,6 +124,33 @@ exports.addLeaseToUnit = async (req, res) => {
 
     const newTenant = new Tenant({ property: unit.property, user: req.user.id, fullName, email, phone, contactNotes });
     await newTenant.save();
+    
+    // --- START: New Tenant Invitation Logic ---
+    try {
+        const tenantUser = new TenantUser({
+            email,
+            tenantInfo: newTenant._id,
+        });
+
+        const invitationToken = crypto.randomBytes(32).toString('hex');
+        tenantUser.invitationToken = invitationToken;
+        tenantUser.invitationExpires = Date.now() + 48 * 60 * 60 * 1000; // 48 hours from now
+
+        await tenantUser.save({ validateBeforeSave: false }); // Save without password validation for now
+
+        // For now, we log the invite URL. Later, we will email this.
+        const inviteURL = `${process.env.FRONTEND_URL}/invite/${invitationToken}`;
+        console.log('--- Tenant Invitation ---');
+        console.log(`Generated for: ${email}`);
+        console.log(`URL: ${inviteURL}`);
+        console.log('-------------------------');
+
+    } catch(err) {
+        console.error('Error creating tenant user invitation:', err);
+        // This part is not critical to the lease creation, so we won't stop the whole process,
+        // but we should be aware of the failure.
+    }
+    // --- END: New Tenant Invitation Logic ---
 
     const newLease = new Lease({
       unit: unitId,
@@ -131,6 +170,7 @@ exports.addLeaseToUnit = async (req, res) => {
     res.status(201).json({ tenant: newTenant, lease: newLease });
   } catch (err) {
     console.error(err.message);
+    // Check for a duplicate key error on the main Tenant model as well
     if (err.code === 11000) return res.status(400).json({ msg: 'A tenant with this email already exists.' });
     res.status(500).send('Server Error');
   }
@@ -388,7 +428,7 @@ exports.updateCommunicationStatus = async (req, res) => {
   }
 };
 
-// ✅ NEW: Function to edit a communication's subject and notes
+// @desc    Function to edit a communication's subject and notes
 exports.editCommunication = async (req, res) => {
     try {
         const { leaseId, commId } = req.params;

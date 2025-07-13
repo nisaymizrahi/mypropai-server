@@ -31,17 +31,22 @@ const CommunicationSchema = new mongoose.Schema({
   notes: { type: String },
   category: {
     type: String,
-    enum: ['Maintenance', 'General Inquiry', 'Payment Issue', 'Other'],
+    enum: ['Maintenance', 'General Inquiry', 'Payment Issue', 'Personal Message', 'Other'],
     default: 'Other'
   },
-  // --- Fields for status and attachments ---
   status: {
     type: String,
     enum: ['Not Started', 'In Progress', 'Finished', 'Closed'],
     default: 'Not Started'
   },
-  attachmentUrl: { type: String }, // optional link to uploaded file
-  attachmentCloudinaryId: { type: String } // To allow for deletion from Cloudinary
+  // ✅ NEW: Field to track the author of the communication
+  author: {
+    type: String,
+    enum: ['Manager', 'Tenant'],
+    default: 'Manager'
+  },
+  attachmentUrl: { type: String },
+  attachmentCloudinaryId: { type: String }
 });
 
 const LeaseSchema = new mongoose.Schema({
@@ -59,8 +64,6 @@ const LeaseSchema = new mongoose.Schema({
 
   transactions: [TransactionSchema],
   recurringCharges: [RecurringChargeSchema],
-
-  // ✅ Client communications
   communications: [CommunicationSchema]
 
 }, { timestamps: true });
