@@ -20,6 +20,10 @@ router.post('/leases/:leaseId/transactions', auth, managementController.addTrans
 router.patch('/leases/:leaseId', auth, managementController.updateLease);
 router.post('/recurring/run', auth, managementController.runRecurringChargesForToday);
 
+// ✅ NEW: Route to send a tenant portal invitation
+router.post('/leases/:leaseId/send-invite', auth, managementController.sendTenantInvite);
+
+
 // --- ✅ Communication Routes ---
 router.get('/leases/:leaseId/communications', auth, managementController.getCommunicationsForLease);
 router.post(
@@ -33,14 +37,11 @@ router.patch(
     auth,
     managementController.updateCommunicationStatus
 );
-
-// ✅ NEW: Route to edit a communication's subject and notes
 router.put(
     '/leases/:leaseId/communications/:commId',
     auth,
     managementController.editCommunication
 );
-
 router.delete('/leases/:leaseId/communications/:commId', auth, managementController.deleteCommunicationFromLease);
 
 module.exports = router;

@@ -3,11 +3,10 @@ const ManagedProperty = require('../models/ManagedProperty');
 const Unit = require('../models/Unit');
 const Tenant = require('../models/Tenant');
 const Lease = require('../models/Lease');
-const cloudinary = require('cloudinary').v2;
-// 1. ADD NEW IMPORTS
 const TenantUser = require('../models/TenantUser');
 const crypto = require('crypto');
-
+const cloudinary = require('cloudinary').v2;
+const sendEmail = require('../utils/sendEmail');
 
 // @desc    Promote an Investment to a ManagedProperty
 exports.promoteInvestment = async (req, res) => {
@@ -340,6 +339,122 @@ exports.updateLease = async (req, res) => {
     console.error('Update Lease Error:', err);
     res.status(500).json({ msg: 'Server error updating lease' });
   }
+};
+exports.addLeaseToUnit = async (req, res) => {
+  const { unitId } = req.params;
+  const { fullName, email, phone, contactNotes, startDate, endDate, rentAmount, securityDeposit, leaseNotes } = req.body;
+
+  if (!fullName || !email || !startDate || !endDate || !rentAmount) {
+    return res.status(400).json({ msg: 'Please provide all required tenant and lease information.' });
+  }
+
+  const existingTenantUser = await TenantUser.findOne({ email });
+  if (existingTenantUser) {
+    return res.status(400).json({ msg: 'A tenant login account with this email already exists.' });
+  }
+
+  try {
+    const unit = await Unit.findById(unitId);
+    if (!unit) return res.status(404).json({ msg: 'Unit not found.' });
+    if (unit.status !== 'Vacant') return res.status(400).json({ msg: 'This unit is already occupied.' });
+
+    const property = await ManagedProperty.findById(unit.property);
+    if (property.user.toString() !== req.user.id) return res.status(401).json({ msg: 'User not authorized.' });
+
+    const newTenant = new Tenant({ property: unit.property, user: req.user.id, fullName, email, phone, contactNotes });
+    await newTenant.save();
+    
+    // Auto-create invitation but don't email yet. We'll use the button for that.
+    try {
+        const tenantUser = new TenantUser({ email, tenantInfo: newTenant._id });
+        const invitationToken = crypto.randomBytes(32).toString('hex');
+        tenantUser.invitationToken = invitationToken;
+        tenantUser.invitationExpires = Date.now() + 48 * 60 * 60 * 1000; // 48 hours
+        await tenantUser.save({ validateBeforeSave: false });
+    } catch(err) {
+        console.error('Error auto-creating tenant user:', err);
+    }
+
+    const newLease = new Lease({
+      unit: unitId,
+      tenant: newTenant._id,
+      startDate,
+      endDate,
+      rentAmount,
+      securityDeposit,
+      notes: leaseNotes,
+      transactions: []
+    });
+    await newLease.save();
+
+    unit.currentLease = newLease._id;
+    unit.status = 'Occupied';
+    await unit.save();
+    res.status(201).json({ tenant: newTenant, lease: newLease });
+  } catch (err) {
+    console.error(err.message);
+    if (err.code === 11000) return res.status(400).json({ msg: 'A tenant with this email already exists.' });
+    res.status(500).send('Server Error');
+  }
+};
+
+
+// ... (all your other functions like getLeaseById, addTransactionToLease, etc. remain here) ...
+
+
+// ✅ NEW: Function to send a tenant portal invitation email
+exports.sendTenantInvite = async (req, res) => {
+    try {
+        const { leaseId } = req.params;
+        const lease = await Lease.findById(leaseId).populate('tenant');
+
+        if (!lease || !lease.tenant) {
+            return res.status(404).json({ msg: 'Lease or tenant not found.' });
+        }
+
+        // Find the corresponding TenantUser account by email
+        let tenantUser = await TenantUser.findOne({ email: lease.tenant.email });
+
+        // If a tenant was added before we built this system, create their account now
+        if (!tenantUser) {
+            tenantUser = new TenantUser({
+                email: lease.tenant.email,
+                tenantInfo: lease.tenant._id,
+            });
+        }
+
+        // Generate a fresh, secure invitation token and set its expiry
+        const invitationToken = crypto.randomBytes(32).toString('hex');
+        tenantUser.invitationToken = invitationToken;
+        tenantUser.invitationExpires = Date.now() + 48 * 60 * 60 * 1000; // 48 hours
+        await tenantUser.save();
+
+        // Create the invitation URL
+        const inviteURL = `${process.env.FRONTEND_URL}/invite/${invitationToken}`;
+
+        // Create the email message
+        const message = `
+            <h1>You're Invited to Your Tenant Portal!</h1>
+            <p>Hello ${lease.tenant.fullName},</p>
+            <p>You have been invited to create an account for your tenant portal for the property at ${lease.unit.property.address}.</p>
+            <p>Please click the link below to set your password and access your account. This link is valid for 48 hours.</p>
+            <a href="${inviteURL}" style="background-color: #14B8A6; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Set Your Password</a>
+            <p>If you did not request this, please ignore this email.</p>
+        `;
+
+        // Use our email utility to send the email
+        await sendEmail({
+            to: lease.tenant.email,
+            subject: 'Your Tenant Portal Invitation',
+            html: message,
+        });
+
+        res.status(200).json({ msg: 'Invitation email sent successfully.' });
+
+    } catch (error) {
+        console.error('Error sending tenant invite:', error);
+        res.status(500).json({ msg: 'Server error while sending invitation.' });
+    }
 };
 
 // @desc    Get all communications for a lease
