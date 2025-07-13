@@ -1,35 +1,6 @@
 const mongoose = require("mongoose");
 
-// A sub-schema for more detailed expense tracking.
-const expenseSchema = new mongoose.Schema({
-  description: { type: String, required: true },
-  category: { type: String, required: true },
-  amount: { type: Number, required: true },
-  vendor: { type: String },
-  notes: { type: String },
-  receiptUrl: { type: String },
-  // UPDATED: Now required, to ensure a user-set date is always provided.
-  date: { type: Date, required: true }, 
-});
-
-// A sub-schema for budget line items.
-const budgetSchema = new mongoose.Schema({
-  category: { type: String, required: true },
-  description: { type: String },
-  amount: { type: Number, required: true },
-  status: {
-    type: String,
-    enum: ["Not Started", "In Progress", "Completed"],
-    default: "Not Started",
-  },
-  // NEW: Added a date field to track when budget items are created.
-  date: {
-      type: Date,
-      default: Date.now
-  }
-});
-
-// The main investment schema, now with a comprehensive analysis structure.
+// The main investment schema.
 const investmentSchema = new mongoose.Schema(
   {
     user: {
@@ -53,11 +24,10 @@ const investmentSchema = new mongoose.Schema(
     yearBuilt: { type: Number },
     unitCount: { type: Number },
 
-    // Renovation Tracking
-    budget: [budgetSchema],
-    expenses: [expenseSchema],
+    // NOTE: The old budget and expenses arrays have been removed from this model.
+    // They are now handled by the new dedicated BudgetItem and Expense models.
 
-    // Deal Analysis section for "soft costs" common to both deal types
+    // Deal Analysis section for "soft costs"
     dealAnalysis: {
       buyingCosts: { type: Number, default: 0 },
       sellingCosts: {
@@ -71,7 +41,7 @@ const investmentSchema = new mongoose.Schema(
       financingCosts: { type: Number, default: 0 }
     },
 
-    // Expanded financing details for both purchase and refinance
+    // Expanded financing details
     financingDetails: {
       purchaseLoan: {
         loanAmount: { type: Number, default: 0 },
@@ -85,7 +55,7 @@ const investmentSchema = new mongoose.Schema(
       }
     },
 
-    // Rental-Specific Operating Expenses for long-term analysis
+    // Rental-Specific Operating Expenses
     rentalAnalysis: {
         vacancyRate: { type: Number, default: 5 },
         repairsMaintenanceRate: { type: Number, default: 5 },
@@ -96,7 +66,6 @@ const investmentSchema = new mongoose.Schema(
         otherMonthlyCosts: { type: Number, default: 0 }
     },
     
-    // UPDATED: Link to the property management system, standardized name.
     managedProperty: { 
       type: mongoose.Schema.Types.ObjectId, 
       ref: 'ManagedProperty',

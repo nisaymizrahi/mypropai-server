@@ -6,7 +6,7 @@ const session = require("express-session");
 const cookieParser = require("cookie-parser");
 const connectDB = require("./config/db");
 
-// --- NEW: Register all database models on startup ---
+// --- Register all database models on startup ---
 require('./models/User'); 
 require('./models/Investment');
 require('./models/ManagedProperty');
@@ -15,6 +15,11 @@ require('./models/Tenant');
 require('./models/Lease');
 require('./models/OperatingExpense');
 require('./models/TenantUser');
+require('./models/BudgetItem');
+require('./models/Expense');
+require('./models/Vendor');
+require('./models/ProjectTask');
+require('./models/ProjectDocument');
 // --- End of Model Registration ---
 
 const investmentRoutes = require("./routes/investments");
@@ -23,8 +28,13 @@ const compsRoutes = require("./routes/comps");
 const uploadRoutes = require("./routes/uploads");
 const managementRoutes = require("./routes/management");
 const tenantAuthRoutes = require("./routes/tenantAuthRoutes");
-// 1. IMPORT THE NEW TENANT ROUTES
 const tenantRoutes = require("./routes/tenantRoutes"); 
+const budgetItemRoutes = require("./routes/budgetItemRoutes");
+const expenseRoutes = require("./routes/expenseRoutes");
+const vendorRoutes = require("./routes/vendorRoutes");
+const projectTaskRoutes = require("./routes/projectTaskRoutes");
+// 1. IMPORT THE NEW DOCUMENT ROUTES
+const documentRoutes = require("./routes/documentRoutes");
 const requireAuth = require("./middleware/requireAuth");
 
 require("./config/passport");
@@ -74,8 +84,13 @@ app.use("/api/comps", requireAuth, compsRoutes);
 app.use("/api/uploads", requireAuth, uploadRoutes);
 app.use("/api/management", requireAuth, managementRoutes);
 app.use("/api/tenant-auth", tenantAuthRoutes);
-// 2. USE THE NEW TENANT ROUTES
 app.use("/api/tenant", tenantRoutes);
+app.use("/api/budget-items", requireAuth, budgetItemRoutes);
+app.use("/api/expenses", requireAuth, expenseRoutes);
+app.use("/api/vendors", requireAuth, vendorRoutes);
+app.use("/api/project-tasks", requireAuth, projectTaskRoutes);
+// 2. USE THE NEW DOCUMENT ROUTES
+app.use("/api/documents", requireAuth, documentRoutes);
 
 
 // Start server
