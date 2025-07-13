@@ -3,6 +3,7 @@ const ManagedProperty = require('../models/ManagedProperty');
 const Unit = require('../models/Unit');
 const Tenant = require('../models/Tenant');
 const Lease = require('../models/Lease');
+const cloudinary = require('cloudinary').v2;
 
 // @desc    Promote an Investment to a ManagedProperty
 exports.promoteInvestment = async (req, res) => {
@@ -289,7 +290,7 @@ exports.updateLease = async (req, res) => {
         }
       }
 
-      lease.recurringCharges = charges; // ✅ fully replace, don’t append
+      lease.recurringCharges = charges; 
     }
 
     await lease.save();
@@ -319,7 +320,6 @@ exports.getCommunicationsForLease = async (req, res) => {
 
 // @desc    Add a communication entry to a lease (with optional file upload)
 exports.addCommunicationToLease = async (req, res) => {
-  // ✅ ADDED FOR DEBUGGING
   console.log('--- ADDING COMMUNICATION ---');
   console.log('Request Body:', req.body);
   console.log('Request File:', req.file);
@@ -332,7 +332,6 @@ exports.addCommunicationToLease = async (req, res) => {
 
     const { subject, notes, category } = req.body;
     if (!subject) {
-        // Added more detail to the error log
         console.error('Validation failed: Subject is missing from request body.');
         return res.status(400).json({ msg: 'Subject is required' });
     }
@@ -389,6 +388,37 @@ exports.updateCommunicationStatus = async (req, res) => {
   }
 };
 
+// ✅ NEW: Function to edit a communication's subject and notes
+exports.editCommunication = async (req, res) => {
+    try {
+        const { leaseId, commId } = req.params;
+        const { subject, notes } = req.body;
+
+        if(!subject) {
+            return res.status(400).json({ msg: 'Subject is required.' });
+        }
+
+        const lease = await Lease.findById(leaseId).populate('tenant');
+        if (!lease || lease.tenant.user.toString() !== req.user.id) {
+            return res.status(401).json({ msg: 'Unauthorized' });
+        }
+
+        const communication = lease.communications.id(commId);
+        if(!communication) {
+            return res.status(404).json({ msg: 'Communication entry not found.' });
+        }
+
+        communication.subject = subject;
+        communication.notes = notes;
+        
+        await lease.save();
+        res.json(communication);
+    } catch (err) {
+        console.error('Error editing communication:', err);
+        res.status(500).json({ msg: 'Server error editing communication' });
+    }
+};
+
 
 // @desc    Delete a specific communication from a lease
 exports.deleteCommunicationFromLease = async (req, res) => {
@@ -400,10 +430,16 @@ exports.deleteCommunicationFromLease = async (req, res) => {
 
     const { commId } = req.params;
     
+    const communicationToDelete = lease.communications.id(commId);
+
+    if (communicationToDelete && communicationToDelete.attachmentCloudinaryId) {
+        await cloudinary.uploader.destroy(communicationToDelete.attachmentCloudinaryId);
+    }
+
     lease.communications = lease.communications.filter(comm => comm._id.toString() !== commId);
 
     await lease.save();
-    res.json({ msg: 'Communication deleted' });
+    res.json({ msg: 'Communication deleted successfully.' });
   } catch (err) {
     console.error('Error deleting communication:', err);
     res.status(500).json({ msg: 'Server error deleting communication' });
