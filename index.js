@@ -22,6 +22,7 @@ require('./models/ProjectTask');
 require('./models/ProjectDocument');
 // --- End of Model Registration ---
 
+// --- Route Imports ---
 const investmentRoutes = require("./routes/investments");
 const authRoutes = require("./routes/auth");
 const compsRoutes = require("./routes/comps");
@@ -33,7 +34,6 @@ const budgetItemRoutes = require("./routes/budgetItemRoutes");
 const expenseRoutes = require("./routes/expenseRoutes");
 const vendorRoutes = require("./routes/vendorRoutes");
 const projectTaskRoutes = require("./routes/projectTaskRoutes");
-// 1. IMPORT THE NEW DOCUMENT ROUTES
 const documentRoutes = require("./routes/documentRoutes");
 const requireAuth = require("./middleware/requireAuth");
 
@@ -77,19 +77,23 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Routes
+// --- API Routes ---
+// Existing Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/investments", requireAuth, investmentRoutes);
 app.use("/api/comps", requireAuth, compsRoutes);
 app.use("/api/uploads", requireAuth, uploadRoutes);
 app.use("/api/management", requireAuth, managementRoutes);
+
+// Tenant Portal Routes
 app.use("/api/tenant-auth", tenantAuthRoutes);
 app.use("/api/tenant", tenantRoutes);
+
+// Project Hub Routes
 app.use("/api/budget-items", requireAuth, budgetItemRoutes);
 app.use("/api/expenses", requireAuth, expenseRoutes);
 app.use("/api/vendors", requireAuth, vendorRoutes);
 app.use("/api/project-tasks", requireAuth, projectTaskRoutes);
-// 2. USE THE NEW DOCUMENT ROUTES
 app.use("/api/documents", requireAuth, documentRoutes);
 
 
