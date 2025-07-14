@@ -35,6 +35,8 @@ const expenseRoutes = require("./routes/expenseRoutes");
 const vendorRoutes = require("./routes/vendorRoutes");
 const projectTaskRoutes = require("./routes/projectTaskRoutes");
 const documentRoutes = require("./routes/documentRoutes");
+// 1. IMPORT THE NEW DASHBOARD ROUTES
+const dashboardRoutes = require("./routes/dashboardRoutes");
 const requireAuth = require("./middleware/requireAuth");
 
 require("./config/passport");
@@ -95,6 +97,9 @@ app.use("/api/expenses", requireAuth, expenseRoutes);
 app.use("/api/vendors", requireAuth, vendorRoutes);
 app.use("/api/project-tasks", requireAuth, projectTaskRoutes);
 app.use("/api/documents", requireAuth, documentRoutes);
+
+// 2. USE THE NEW DASHBOARD ROUTES
+app.use("/api/dashboard", requireAuth, dashboardRoutes);
 
 
 // Start server
