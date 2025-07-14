@@ -4,6 +4,7 @@ const auth = require('../middleware/requireAuth');
 const upload = require('../middleware/upload'); 
 const managementController = require('../controllers/managementController');
 
+console.log("✅ management.js routes file LOADED ✅");
 // --- Property Level Routes ---
 router.post('/promote/:investmentId', auth, managementController.promoteInvestment);
 router.get('/', auth, managementController.getManagedProperties);
