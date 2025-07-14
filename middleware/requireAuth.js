@@ -1,30 +1,31 @@
 const jwt = require("jsonwebtoken");
 const mongoose = require('mongoose');
-const User = mongoose.model('User'); // NEW: Import the User model
+const User = mongoose.model('User');
+const redisClient = require('../config/redisClient'); // 1. IMPORT REDIS CLIENT
 
-const requireAuth = async (req, res, next) => { // UPDATED: Made the function async
-  const authHeader = req.get("Authorization");
-  let token = null;
+const requireAuth = async (req, res, next) => {
+  const { authorization } = req.headers;
 
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    token = authHeader.substring(7);
+  if (!authorization || !authorization.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Authorization token required" });
   }
 
-  if (!token) {
-    return res.status(401).json({ error: "Unauthorized: No token provided" });
-  }
+  const token = authorization.split(" ")[1];
 
   try {
+    // 2. CHECK IF TOKEN IS ON THE BLOCKLIST
+    const isBlocklisted = await redisClient.get(token);
+    if (isBlocklisted) {
+      return res.status(401).json({ error: "Token has been invalidated" });
+    }
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    // NEW: Fetch the user from the database using the ID from the token
-    const user = await User.findById(decoded.userId).select("-password"); // Exclude password for security
-
+    
+    const user = await User.findById(decoded.userId).select("-password");
     if (!user) {
         return res.status(404).json({ error: "User not found" });
     }
 
-    // UPDATED: Attach the full user object to the request
     req.user = user;
     
     next();
