@@ -651,11 +651,23 @@ exports.getArchivedLeases = async (req, res) => {
     try {
         const { propertyId } = req.params;
 
-        // Verify the user owns the parent property
+        console.log('----- ARCHIVED LEASES DEBUG -----');
+        console.log('Requested Property ID:', propertyId);
+        console.log('Logged-in User ID:', req.user.id);
+
+        // Look up the property
         const property = await ManagedProperty.findById(propertyId);
-        if (!property || property.user.toString() !== req.user.id) {
+        if (!property) {
+            console.log('❌ Property not found in database');
+            return res.status(404).json({ msg: 'Property not found' });
+        }
+
+        if (property.user.toString() !== req.user.id) {
+            console.log('🔒 Unauthorized access. Property owner:', property.user.toString());
             return res.status(401).json({ msg: 'User not authorized for this property.' });
         }
+
+        console.log('✅ Property found and authorized. Getting archived leases...');
 
         // Get all unit IDs for this property
         const unitIds = property.units;
@@ -669,10 +681,12 @@ exports.getArchivedLeases = async (req, res) => {
         .populate('unit', 'name')
         .sort({ endDate: -1 });
 
+        console.log(`✅ Found ${archivedLeases.length} archived leases`);
+
         res.json(archivedLeases);
 
     } catch (err) {
-        console.error('Error fetching archived leases:', err);
+        console.error('❗ Error fetching archived leases:', err);
         res.status(500).send('Server Error');
     }
 };
