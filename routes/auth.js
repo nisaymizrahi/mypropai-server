@@ -3,7 +3,7 @@ const passport = require("passport");
 const router = express.Router();
 const authController = require('../controllers/authController');
 const requireAuth = require('../middleware/requireAuth');
-const jwt = require('jsonwebtoken'); // ✅ THIS LINE FIXES THE ERROR
+const jwt = require('jsonwebtoken');
 
 // --- Email & Password ---
 router.post("/signup", authController.signup);
@@ -35,7 +35,12 @@ router.get(
   }
 );
 
-// --- Check Session ---
+// --- Check Session & Profile Updates ---
 router.get("/me", requireAuth, authController.getMe);
+router.patch("/me/update", requireAuth, authController.updateMe);
+
+// ✅ NEW: Route to change the user's password
+router.post("/change-password", requireAuth, authController.changePassword);
+
 
 module.exports = router;

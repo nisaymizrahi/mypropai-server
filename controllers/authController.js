@@ -25,7 +25,6 @@ exports.signup = async (req, res) => {
         const existing = await User.findOne({ email });
         if (existing) return res.status(409).json({ message: "Email already in use" });
         
-        // The pre-save hook in User.js will now handle hashing
         const user = await User.create({ email, password, name });
 
         const token = generateToken(user);
@@ -68,18 +67,16 @@ exports.logout = async (req, res) => {
     try {
         const authHeader = req.headers.authorization;
         if (!authHeader || !authHeader.startsWith("Bearer ")) {
-            return res.sendStatus(204); // No token provided, nothing to do
+            return res.sendStatus(204);
         }
 
         const token = authHeader.split(" ")[1];
         const decoded = jwt.decode(token);
 
-        // Calculate remaining time until token expires
         const expiresAt = decoded.exp * 1000;
         const remainingSeconds = Math.ceil((expiresAt - Date.now()) / 1000);
 
         if (remainingSeconds > 0) {
-            // Add the token to the Redis blocklist with an expiration
             await redisClient.set(token, 'blocklisted', {
                 EX: remainingSeconds
             });
@@ -94,6 +91,63 @@ exports.logout = async (req, res) => {
 
 // @desc    Get the current logged-in user
 exports.getMe = async (req, res) => {
-    // The user object is attached to req by the requireAuth middleware
     res.json(req.user);
+};
+
+// @desc    Update the logged-in user's profile
+exports.updateMe = async (req, res) => {
+    try {
+        const { name, email } = req.body;
+        const user = await User.findById(req.user.id);
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found." });
+        }
+
+        user.name = name || user.name;
+        user.email = email || user.email;
+
+        const updatedUser = await user.save();
+
+        res.json({
+            id: updatedUser._id,
+            name: updatedUser.name,
+            email: updatedUser.email,
+            avatar: updatedUser.avatar,
+        });
+
+    } catch (error) {
+        console.error("Update profile error:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+// ✅ NEW: Function to change the user's password
+exports.changePassword = async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+        return res.status(400).json({ message: 'Please provide both current and new passwords.' });
+    }
+    if (newPassword.length < 6) {
+        return res.status(400).json({ message: 'New password must be at least 6 characters.' });
+    }
+
+    try {
+        const user = await User.findById(req.user.id).select('+password');
+
+        const isMatch = await user.comparePassword(currentPassword);
+        if (!isMatch) {
+            return res.status(401).json({ message: 'Incorrect current password.' });
+        }
+
+        user.password = newPassword;
+        await user.save();
+
+        res.status(200).json({ message: 'Password changed successfully.' });
+        
+    } catch (error) {
+        console.error('Change password error:', error);
+        res.status(500).json({ message: 'Internal server error.' });
+    }
 };
