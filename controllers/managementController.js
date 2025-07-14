@@ -96,6 +96,29 @@ exports.addUnitToProperty = async (req, res) => {
     res.status(500).send('Server Error');
   }
 };
+exports.getUnitById = async (req, res) => {
+    try {
+        const unit = await Unit.findById(req.params.unitId).populate({
+            path: 'property',
+            select: 'user address'
+        });
+
+        if (!unit) {
+            return res.status(404).json({ msg: 'Unit not found.' });
+        }
+
+        // Check ownership via the parent property
+        if (unit.property.user.toString() !== req.user.id) {
+            return res.status(401).json({ msg: 'User not authorized for this unit.' });
+        }
+
+        res.json(unit);
+
+    } catch (err) {
+        console.error("Error fetching unit by ID:", err.message);
+        res.status(500).send('Server Error');
+    }
+};
 
 // @desc   Add a Tenant and a Lease to a specific Unit
 exports.addLeaseToUnit = async (req, res) => {
@@ -521,20 +544,21 @@ exports.deleteCommunicationFromLease = async (req, res) => {
   }
 };
 exports.updateListingDetails = async (req, res) => {
-    const { propertyId } = req.params;
-    const { headline, description, amenities } = req.body;
+    const { unitId } = req.params;
+    const { headline, description, rent, amenities } = req.body;
     try {
-        const property = await ManagedProperty.findById(propertyId);
-        if (!property || property.user.toString() !== req.user.id) {
-            return res.status(401).json({ msg: 'User not authorized for this property.' });
+        const unit = await Unit.findById(unitId).populate('property');
+        if (!unit || unit.property.user.toString() !== req.user.id) {
+            return res.status(401).json({ msg: 'User not authorized for this unit.' });
         }
         
-        property.listingDetails.headline = headline;
-        property.listingDetails.description = description;
-        property.listingDetails.amenities = amenities;
+        unit.listingDetails.headline = headline;
+        unit.listingDetails.description = description;
+        unit.listingDetails.rent = rent;
+        unit.listingDetails.amenities = amenities;
 
-        await property.save();
-        res.json(property.listingDetails);
+        await unit.save();
+        res.json(unit.listingDetails);
     } catch (err) {
         console.error('Error updating listing details:', err);
         res.status(500).send('Server Error');
@@ -542,11 +566,11 @@ exports.updateListingDetails = async (req, res) => {
 };
 
 exports.addListingPhotos = async (req, res) => {
-    const { propertyId } = req.params;
+    const { unitId } = req.params;
     try {
-        const property = await ManagedProperty.findById(propertyId);
-        if (!property || property.user.toString() !== req.user.id) {
-            return res.status(401).json({ msg: 'User not authorized for this property.' });
+        const unit = await Unit.findById(unitId).populate('property');
+        if (!unit || unit.property.user.toString() !== req.user.id) {
+            return res.status(401).json({ msg: 'User not authorized for this unit.' });
         }
 
         if (!req.files || req.files.length === 0) {
@@ -558,9 +582,9 @@ exports.addListingPhotos = async (req, res) => {
             cloudinaryId: file.filename,
         }));
 
-        property.listingDetails.photos.push(...newPhotos);
-        await property.save();
-        res.status(201).json(property.listingDetails.photos);
+        unit.listingDetails.photos.push(...newPhotos);
+        await unit.save();
+        res.status(201).json(unit.listingDetails.photos);
 
     } catch (err) {
         console.error('Error adding listing photos:', err);
@@ -569,14 +593,14 @@ exports.addListingPhotos = async (req, res) => {
 };
 
 exports.deleteListingPhoto = async (req, res) => {
-    const { propertyId, photoId } = req.params;
+    const { unitId, photoId } = req.params;
     try {
-        const property = await ManagedProperty.findById(propertyId);
-        if (!property || property.user.toString() !== req.user.id) {
-            return res.status(401).json({ msg: 'User not authorized for this property.' });
+        const unit = await Unit.findById(unitId).populate('property');
+        if (!unit || unit.property.user.toString() !== req.user.id) {
+            return res.status(401).json({ msg: 'User not authorized for this unit.' });
         }
 
-        const photoToDelete = property.listingDetails.photos.id(photoId);
+        const photoToDelete = unit.listingDetails.photos.id(photoId);
         if (!photoToDelete) {
             return res.status(404).json({ msg: 'Photo not found.' });
         }
@@ -585,8 +609,8 @@ exports.deleteListingPhoto = async (req, res) => {
         await cloudinary.uploader.destroy(photoToDelete.cloudinaryId);
 
         // Remove from database
-        property.listingDetails.photos.pull(photoId);
-        await property.save();
+        unit.listingDetails.photos.pull(photoId);
+        await unit.save();
 
         res.json({ msg: 'Photo deleted successfully.' });
 

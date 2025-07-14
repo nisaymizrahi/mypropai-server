@@ -13,6 +13,9 @@ router.get('/:propertyId', auth, managementController.getManagedPropertyById);
 // --- Unit Level Routes ---
 router.post('/:propertyId/units', auth, managementController.addUnitToProperty);
 router.post('/units/:unitId/lease', auth, managementController.addLeaseToUnit);
+// ✅ NEW: Route to get a single unit by its ID
+router.get('/units/:unitId', auth, managementController.getUnitById);
+
 
 // --- Lease Level Routes ---
 router.get('/leases/:leaseId', auth, managementController.getLeaseById);
@@ -43,16 +46,10 @@ router.put(
 router.delete('/leases/:leaseId/communications/:commId', auth, managementController.deleteCommunicationFromLease);
 
 
-// --- ✅ NEW: Listing & Marketing Routes ---
-
-// Update listing details (headline, description, etc.)
-router.patch('/:propertyId/listing', auth, managementController.updateListingDetails);
-
-// Upload new photos for a listing
-router.post('/:propertyId/listing/photos', auth, upload.array('photos', 10), managementController.addListingPhotos);
-
-// Delete a photo from a listing
-router.delete('/:propertyId/listing/photos/:photoId', auth, managementController.deleteListingPhoto);
+// --- Listing & Marketing Routes (Now Per-Unit) ---
+router.patch('/units/:unitId/listing', auth, managementController.updateListingDetails);
+router.post('/units/:unitId/listing/photos', auth, upload.array('photos', 10), managementController.addListingPhotos);
+router.delete('/units/:unitId/listing/photos/:photoId', auth, managementController.deleteListingPhoto);
 
 
 module.exports = router;

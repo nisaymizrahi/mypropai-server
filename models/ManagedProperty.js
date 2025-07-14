@@ -46,18 +46,9 @@ const ManagedPropertySchema = new mongoose.Schema({
     },
     // A field for the user to update the property's estimated current value
     currentValue: { type: Number }
-  },
-
-  // ✅ NEW: Section for marketing and listing details
-  listingDetails: {
-    headline: { type: String, trim: true },
-    description: { type: String, trim: true },
-    amenities: [String],
-    photos: [{
-      url: { type: String, required: true },
-      cloudinaryId: { type: String, required: true },
-    }]
   }
+
+  // ✅ REMOVED: The listingDetails object was removed from here.
 
 }, { timestamps: true });
 

@@ -28,7 +28,20 @@ const UnitSchema = new mongoose.Schema({
       type: String,
       enum: ['Occupied', 'Vacant'],
       default: 'Vacant'
+  },
+  
+  // ✅ NEW: Section for marketing and listing details for this specific unit
+  listingDetails: {
+    headline: { type: String, trim: true },
+    description: { type: String, trim: true },
+    rent: { type: Number }, // To store the asking rent for the listing
+    amenities: [String],
+    photos: [{
+      url: { type: String, required: true },
+      cloudinaryId: { type: String, required: true },
+    }]
   }
+
 }, { timestamps: true });
 
 module.exports = mongoose.model('Unit', UnitSchema);
