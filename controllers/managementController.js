@@ -619,3 +619,60 @@ exports.deleteListingPhoto = async (req, res) => {
         res.status(500).send('Server Error');
     }
 };
+exports.archiveLease = async (req, res) => {
+    const { leaseId } = req.params;
+    try {
+        // Find the lease and check ownership
+        const lease = await Lease.findById(leaseId).populate('tenant');
+        if (!lease || lease.tenant.user.toString() !== req.user.id) {
+            return res.status(401).json({ msg: 'User not authorized for this lease.' });
+        }
+
+        // 1. Set the lease to inactive
+        lease.isActive = false;
+        await lease.save();
+
+        // 2. Find the corresponding unit and set it to Vacant
+        const unit = await Unit.findById(lease.unit);
+        if (unit) {
+            unit.status = 'Vacant';
+            unit.currentLease = null;
+            await unit.save();
+        }
+
+        res.status(200).json({ msg: 'Lease successfully archived and unit set to vacant.' });
+
+    } catch (err) {
+        console.error('Error archiving lease:', err);
+        res.status(500).send('Server Error');
+    }
+};
+exports.getArchivedLeases = async (req, res) => {
+    try {
+        const { propertyId } = req.params;
+
+        // Verify the user owns the parent property
+        const property = await ManagedProperty.findById(propertyId);
+        if (!property || property.user.toString() !== req.user.id) {
+            return res.status(401).json({ msg: 'User not authorized for this property.' });
+        }
+
+        // Get all unit IDs for this property
+        const unitIds = property.units;
+
+        // Find all inactive leases linked to those units
+        const archivedLeases = await Lease.find({ 
+            unit: { $in: unitIds },
+            isActive: false
+        })
+        .populate('tenant', 'fullName')
+        .populate('unit', 'name')
+        .sort({ endDate: -1 });
+
+        res.json(archivedLeases);
+
+    } catch (err) {
+        console.error('Error fetching archived leases:', err);
+        res.status(500).send('Server Error');
+    }
+};

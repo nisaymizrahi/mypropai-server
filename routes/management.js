@@ -9,12 +9,14 @@ router.post('/promote/:investmentId', auth, managementController.promoteInvestme
 router.get('/', auth, managementController.getManagedProperties);
 router.get('/unmanaged-properties', auth, managementController.getUnmanagedProperties);
 router.get('/:propertyId', auth, managementController.getManagedPropertyById);
+// ✅ NEW: Route to get archived leases for a property
+router.get('/:propertyId/archived-leases', auth, managementController.getArchivedLeases);
+
 
 // --- Unit Level Routes ---
 router.post('/:propertyId/units', auth, managementController.addUnitToProperty);
-router.post('/units/:unitId/lease', auth, managementController.addLeaseToUnit);
-// ✅ NEW: Route to get a single unit by its ID
 router.get('/units/:unitId', auth, managementController.getUnitById);
+router.post('/units/:unitId/lease', auth, managementController.addLeaseToUnit);
 
 
 // --- Lease Level Routes ---
@@ -23,6 +25,7 @@ router.post('/leases/:leaseId/transactions', auth, managementController.addTrans
 router.patch('/leases/:leaseId', auth, managementController.updateLease);
 router.post('/recurring/run', auth, managementController.runRecurringChargesForToday);
 router.post('/leases/:leaseId/send-invite', auth, managementController.sendTenantInvite);
+router.post('/leases/:leaseId/archive', auth, managementController.archiveLease);
 
 
 // --- Communication Routes ---
