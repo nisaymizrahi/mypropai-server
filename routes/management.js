@@ -9,7 +9,6 @@ router.post('/promote/:investmentId', auth, managementController.promoteInvestme
 router.get('/', auth, managementController.getManagedProperties);
 router.get('/unmanaged-properties', auth, managementController.getUnmanagedProperties);
 router.get('/:propertyId', auth, managementController.getManagedPropertyById);
-// ✅ NEW: Route to get archived leases for a property
 router.get('/:propertyId/archived-leases', auth, managementController.getArchivedLeases);
 
 
