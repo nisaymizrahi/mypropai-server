@@ -21,6 +21,7 @@ require('./models/Vendor');
 require('./models/ProjectTask');
 require('./models/ProjectDocument');
 require('./models/MaintenanceTicket');
+require('./models/Inspection');
 // --- End of Model Registration ---
 
 // --- Route Imports ---
@@ -38,8 +39,10 @@ const projectTaskRoutes = require("./routes/projectTaskRoutes");
 const documentRoutes = require("./routes/documentRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const maintenanceRoutes = require("./routes/maintenanceRoutes");
-// 1. IMPORT THE NEW OPERATING EXPENSE ROUTES
 const operatingExpenseRoutes = require("./routes/operatingExpenseRoutes");
+const inspectionRoutes = require("./routes/inspectionRoutes");
+// 1. IMPORT THE NEW AI ROUTES
+const aiToolsRoutes = require("./routes/aiToolsRoutes");
 const requireAuth = require("./middleware/requireAuth");
 
 require("./config/passport");
@@ -97,8 +100,10 @@ app.use("/api/project-tasks", requireAuth, projectTaskRoutes);
 app.use("/api/documents", requireAuth, documentRoutes);
 app.use("/api/dashboard", requireAuth, dashboardRoutes);
 app.use("/api/maintenance", requireAuth, maintenanceRoutes);
-// 2. USE THE NEW OPERATING EXPENSE ROUTES
 app.use("/api/operating-expenses", requireAuth, operatingExpenseRoutes);
+app.use("/api/inspections", requireAuth, inspectionRoutes);
+// 2. USE THE NEW AI ROUTES
+app.use("/api/ai-tools", requireAuth, aiToolsRoutes);
 
 
 // Start server

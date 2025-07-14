@@ -41,6 +41,14 @@ const VendorSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  
+  // ✅ NEW: Section for compliance tracking
+  compliance: {
+    w9_url: { type: String },
+    insurance_url: { type: String },
+    insurance_expiration_date: { type: Date },
+  }
+
 }, { timestamps: true });
 
 module.exports = mongoose.model('Vendor', VendorSchema);

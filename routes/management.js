@@ -19,12 +19,10 @@ router.get('/leases/:leaseId', auth, managementController.getLeaseById);
 router.post('/leases/:leaseId/transactions', auth, managementController.addTransactionToLease);
 router.patch('/leases/:leaseId', auth, managementController.updateLease);
 router.post('/recurring/run', auth, managementController.runRecurringChargesForToday);
-
-// ✅ NEW: Route to send a tenant portal invitation
 router.post('/leases/:leaseId/send-invite', auth, managementController.sendTenantInvite);
 
 
-// --- ✅ Communication Routes ---
+// --- Communication Routes ---
 router.get('/leases/:leaseId/communications', auth, managementController.getCommunicationsForLease);
 router.post(
   '/leases/:leaseId/communications',
@@ -43,5 +41,18 @@ router.put(
     managementController.editCommunication
 );
 router.delete('/leases/:leaseId/communications/:commId', auth, managementController.deleteCommunicationFromLease);
+
+
+// --- ✅ NEW: Listing & Marketing Routes ---
+
+// Update listing details (headline, description, etc.)
+router.patch('/:propertyId/listing', auth, managementController.updateListingDetails);
+
+// Upload new photos for a listing
+router.post('/:propertyId/listing/photos', auth, upload.array('photos', 10), managementController.addListingPhotos);
+
+// Delete a photo from a listing
+router.delete('/:propertyId/listing/photos/:photoId', auth, managementController.deleteListingPhoto);
+
 
 module.exports = router;

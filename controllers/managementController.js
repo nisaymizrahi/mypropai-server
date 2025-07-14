@@ -520,3 +520,78 @@ exports.deleteCommunicationFromLease = async (req, res) => {
     res.status(500).json({ msg: 'Server error deleting communication' });
   }
 };
+exports.updateListingDetails = async (req, res) => {
+    const { propertyId } = req.params;
+    const { headline, description, amenities } = req.body;
+    try {
+        const property = await ManagedProperty.findById(propertyId);
+        if (!property || property.user.toString() !== req.user.id) {
+            return res.status(401).json({ msg: 'User not authorized for this property.' });
+        }
+        
+        property.listingDetails.headline = headline;
+        property.listingDetails.description = description;
+        property.listingDetails.amenities = amenities;
+
+        await property.save();
+        res.json(property.listingDetails);
+    } catch (err) {
+        console.error('Error updating listing details:', err);
+        res.status(500).send('Server Error');
+    }
+};
+
+exports.addListingPhotos = async (req, res) => {
+    const { propertyId } = req.params;
+    try {
+        const property = await ManagedProperty.findById(propertyId);
+        if (!property || property.user.toString() !== req.user.id) {
+            return res.status(401).json({ msg: 'User not authorized for this property.' });
+        }
+
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ msg: 'No files uploaded.' });
+        }
+        
+        const newPhotos = req.files.map(file => ({
+            url: file.path,
+            cloudinaryId: file.filename,
+        }));
+
+        property.listingDetails.photos.push(...newPhotos);
+        await property.save();
+        res.status(201).json(property.listingDetails.photos);
+
+    } catch (err) {
+        console.error('Error adding listing photos:', err);
+        res.status(500).send('Server Error');
+    }
+};
+
+exports.deleteListingPhoto = async (req, res) => {
+    const { propertyId, photoId } = req.params;
+    try {
+        const property = await ManagedProperty.findById(propertyId);
+        if (!property || property.user.toString() !== req.user.id) {
+            return res.status(401).json({ msg: 'User not authorized for this property.' });
+        }
+
+        const photoToDelete = property.listingDetails.photos.id(photoId);
+        if (!photoToDelete) {
+            return res.status(404).json({ msg: 'Photo not found.' });
+        }
+
+        // Delete from Cloudinary
+        await cloudinary.uploader.destroy(photoToDelete.cloudinaryId);
+
+        // Remove from database
+        property.listingDetails.photos.pull(photoId);
+        await property.save();
+
+        res.json({ msg: 'Photo deleted successfully.' });
+
+    } catch (err) {
+        console.error('Error deleting listing photo:', err);
+        res.status(500).send('Server Error');
+    }
+};

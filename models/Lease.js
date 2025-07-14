@@ -24,7 +24,7 @@ const RecurringChargeSchema = new mongoose.Schema({
   amount: { type: Number, required: true } // cents
 });
 
-// ✅ UPDATED: Client communication schema
+// Client communication schema
 const CommunicationSchema = new mongoose.Schema({
   date: { type: Date, default: Date.now },
   subject: { type: String, required: true },
@@ -39,7 +39,6 @@ const CommunicationSchema = new mongoose.Schema({
     enum: ['Not Started', 'In Progress', 'Finished', 'Closed'],
     default: 'Not Started'
   },
-  // ✅ NEW: Field to track the author of the communication
   author: {
     type: String,
     enum: ['Manager', 'Tenant'],
@@ -57,6 +56,18 @@ const LeaseSchema = new mongoose.Schema({
   endDate: { type: Date, required: true },
   rentAmount: { type: Number, required: true },
   securityDeposit: { type: Number, default: 0 },
+
+  // ✅ NEW: Section for late fee rules
+  lateFeePolicy: {
+    applies: { type: Boolean, default: false },
+    feeType: { 
+        type: String, 
+        enum: ['Fixed Amount', 'Percentage'],
+        default: 'Fixed Amount'
+    },
+    amount: { type: Number, default: 50 }, // Represents either a dollar amount or a percentage
+    daysLate: { type: Number, default: 5 } // Grace period in days
+  },
 
   isActive: { type: Boolean, default: true },
   leaseDocumentUrl: String,
