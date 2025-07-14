@@ -20,6 +20,7 @@ require('./models/Expense');
 require('./models/Vendor');
 require('./models/ProjectTask');
 require('./models/ProjectDocument');
+require('./models/MaintenanceTicket');
 // --- End of Model Registration ---
 
 // --- Route Imports ---
@@ -35,8 +36,10 @@ const expenseRoutes = require("./routes/expenseRoutes");
 const vendorRoutes = require("./routes/vendorRoutes");
 const projectTaskRoutes = require("./routes/projectTaskRoutes");
 const documentRoutes = require("./routes/documentRoutes");
-// 1. IMPORT THE NEW DASHBOARD ROUTES
 const dashboardRoutes = require("./routes/dashboardRoutes");
+const maintenanceRoutes = require("./routes/maintenanceRoutes");
+// 1. IMPORT THE NEW OPERATING EXPENSE ROUTES
+const operatingExpenseRoutes = require("./routes/operatingExpenseRoutes");
 const requireAuth = require("./middleware/requireAuth");
 
 require("./config/passport");
@@ -80,26 +83,22 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // --- API Routes ---
-// Existing Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/investments", requireAuth, investmentRoutes);
 app.use("/api/comps", requireAuth, compsRoutes);
 app.use("/api/uploads", requireAuth, uploadRoutes);
 app.use("/api/management", requireAuth, managementRoutes);
-
-// Tenant Portal Routes
 app.use("/api/tenant-auth", tenantAuthRoutes);
 app.use("/api/tenant", tenantRoutes);
-
-// Project Hub Routes
 app.use("/api/budget-items", requireAuth, budgetItemRoutes);
 app.use("/api/expenses", requireAuth, expenseRoutes);
 app.use("/api/vendors", requireAuth, vendorRoutes);
 app.use("/api/project-tasks", requireAuth, projectTaskRoutes);
 app.use("/api/documents", requireAuth, documentRoutes);
-
-// 2. USE THE NEW DASHBOARD ROUTES
 app.use("/api/dashboard", requireAuth, dashboardRoutes);
+app.use("/api/maintenance", requireAuth, maintenanceRoutes);
+// 2. USE THE NEW OPERATING EXPENSE ROUTES
+app.use("/api/operating-expenses", requireAuth, operatingExpenseRoutes);
 
 
 // Start server

@@ -28,7 +28,26 @@ const ManagedPropertySchema = new mongoose.Schema({
   isActive: { 
     type: Boolean,
     default: true
+  },
+
+  // ✅ NEW: Section for storing detailed financial data for performance tracking
+  financials: {
+    // Mortgage Details
+    mortgage: {
+        loanAmount: { type: Number, default: 0 },
+        interestRate: { type: Number, default: 0 },
+        loanTerm: { type: Number, default: 30 }, // In years
+        loanStartDate: { type: Date }
+    },
+    // Key Operating Expenses (Annual)
+    operatingExpenses: {
+        propertyTaxes: { type: Number, default: 0 },
+        insurance: { type: Number, default: 0 },
+    },
+    // A field for the user to update the property's estimated current value
+    currentValue: { type: Number }
   }
+
 }, { timestamps: true });
 
 module.exports = mongoose.model('ManagedProperty', ManagedPropertySchema);
