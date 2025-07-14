@@ -8,8 +8,8 @@ const managementController = require('../controllers/managementController');
 router.post('/promote/:investmentId', auth, managementController.promoteInvestment);
 router.get('/', auth, managementController.getManagedProperties);
 router.get('/unmanaged-properties', auth, managementController.getUnmanagedProperties);
-router.get('/:propertyId', auth, managementController.getManagedPropertyById);
-router.get('/:propertyId/archived-leases', auth, managementController.getArchivedLeases);
+router.get('/:propertyId/archived-leases', auth, managementController.getArchivedLeases); // ✅ moved BEFORE generic
+router.get('/:propertyId', auth, managementController.getManagedPropertyById);             // generic goes last
 
 
 // --- Unit Level Routes ---
