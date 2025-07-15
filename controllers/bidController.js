@@ -25,6 +25,11 @@ exports.importBid = async (req, res) => {
         // --- Step 1: Call OCR.space API to extract text from the file ---
         const form = new FormData();
         form.append('url', req.file.path); // Use the URL from Cloudinary
+        
+        // ✅ THIS IS THE FIX: Tell the OCR service what kind of file it is.
+        const fileExtension = req.file.originalname.split('.').pop();
+        form.append('filetype', fileExtension);
+        
         form.append('isOverlayRequired', 'false');
         form.append('language', 'eng');
 
