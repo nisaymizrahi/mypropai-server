@@ -53,4 +53,8 @@ router.patch('/units/:unitId/listing', auth, managementController.updateListingD
 router.post('/units/:unitId/listing/photos', auth, upload.array('photos', 10), managementController.addListingPhotos);
 router.delete('/units/:unitId/listing/photos/:photoId', auth, managementController.deleteListingPhoto);
 
+router.post('/units/:unitId/documents', auth, upload.single('file'), managementController.uploadUnitDocument);
+router.get('/units/:unitId/documents', auth, managementController.getUnitDocuments);
+router.delete('/documents/:docId', auth, managementController.deleteUnitDocument);
+
 module.exports = router;

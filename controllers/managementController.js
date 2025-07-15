@@ -690,3 +690,75 @@ exports.getArchivedLeases = async (req, res) => {
         res.status(500).send('Server Error');
     }
 };
+const UnitDocument = require('../models/UnitDocument');
+
+// Upload document to unit
+exports.uploadUnitDocument = async (req, res) => {
+  try {
+    const { unitId } = req.params;
+    const { displayName } = req.body;
+
+    if (!req.file || !displayName) {
+      return res.status(400).json({ msg: 'File and display name are required.' });
+    }
+
+    const unit = await Unit.findById(unitId).populate('property');
+    if (!unit || unit.property.user.toString() !== req.user.id) {
+      return res.status(401).json({ msg: 'Not authorized for this unit.' });
+    }
+
+    const newDoc = new UnitDocument({
+      unit: unit._id,
+      uploadedBy: req.user.id,
+      displayName,
+      fileUrl: req.file.path,
+      cloudinaryId: req.file.filename
+    });
+
+    await newDoc.save();
+    res.status(201).json(newDoc);
+  } catch (err) {
+    console.error('Upload Error:', err);
+    res.status(500).json({ msg: 'Server error uploading document.' });
+  }
+};
+
+exports.getUnitDocuments = async (req, res) => {
+  try {
+    const { unitId } = req.params;
+
+    const unit = await Unit.findById(unitId).populate('property');
+    if (!unit || unit.property.user.toString() !== req.user.id) {
+      return res.status(401).json({ msg: 'Not authorized for this unit.' });
+    }
+
+    const docs = await UnitDocument.find({ unit: unitId }).sort({ createdAt: -1 });
+    res.json(docs);
+  } catch (err) {
+    console.error('Fetch Docs Error:', err);
+    res.status(500).json({ msg: 'Server error fetching documents.' });
+  }
+};
+
+exports.deleteUnitDocument = async (req, res) => {
+  try {
+    const doc = await UnitDocument.findById(req.params.docId).populate({
+      path: 'unit',
+      populate: { path: 'property' }
+    });
+
+    if (!doc || doc.unit.property.user.toString() !== req.user.id) {
+      return res.status(401).json({ msg: 'Not authorized to delete this document.' });
+    }
+
+    if (doc.cloudinaryId) {
+      await cloudinary.uploader.destroy(doc.cloudinaryId);
+    }
+
+    await doc.deleteOne();
+    res.json({ msg: 'Document deleted successfully.' });
+  } catch (err) {
+    console.error('Delete Doc Error:', err);
+    res.status(500).json({ msg: 'Server error deleting document.' });
+  }
+};
