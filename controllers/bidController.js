@@ -2,13 +2,8 @@ const Bid = require('../models/Bid');
 const Lead = require('../models/Lead');
 const OpenAI = require('openai');
 const axios = require('axios');
-// We no longer need the form-data library for this function
-// const FormData = require('form-data'); 
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // @desc    Upload an estimate, parse it with AI, and create a new bid
 exports.importBid = async (req, res) => {
@@ -23,47 +18,41 @@ exports.importBid = async (req, res) => {
             return res.status(401).json({ msg: 'Lead not found or user not authorized.' });
         }
 
-        // --- Step 1: Call OCR.space API to extract text from the file ---
-        // ✅ THIS IS THE FIX: We are now sending the request as application/x-www-form-urlencoded
-        const ocrResponse = await axios.post('https://api.ocr.space/parse/image', new URLSearchParams({
+        // ✅ CORRECTED: Use URLSearchParams for the OCR.space API call
+        const ocrData = new URLSearchParams({
             url: req.file.path,
             isOverlayRequired: 'false',
             language: 'eng',
-        }), {
+            filetype: req.file.originalname.split('.').pop()
+        });
+
+        const ocrResponse = await axios.post('https://api.ocr.space/parse/image', ocrData, {
             headers: {
                 'apikey': process.env.OCR_SPACE_API_KEY,
                 'Content-Type': 'application/x-www-form-urlencoded'
             },
         });
-        
+
         if (ocrResponse.data.IsErroredOnProcessing) {
             throw new Error(ocrResponse.data.ErrorMessage.join(', '));
         }
         
         const extractedText = ocrResponse.data.ParsedResults[0].ParsedText;
-        
-        // --- Step 2: Send extracted text to OpenAI for structuring ---
-        const systemPrompt = `
-            You are an expert data extraction bot for real estate estimates. Analyze the following text extracted from a contractor's bid. 
-            Your task is to identify the contractor's name, the total bid amount, and all individual line items with their descriptions and costs.
-            Structure your response as a valid JSON object with the following keys: "contractorName", "totalAmount", and "items". 
-            The "items" key should be an array of objects, where each object has a "description" and a "cost" key.
-            If you cannot find a value for a field, set it to an empty string or 0.
-        `;
+        if (!extractedText || extractedText.trim() === '') {
+            throw new Error('OCR could not extract any text from the document.');
+        }
+
+        const systemPrompt = `You are an expert data extraction bot for real estate estimates. Analyze the following text extracted from a contractor's bid. Your task is to identify the contractor's name, the total bid amount, and all individual line items with their descriptions and costs. Structure your response as a valid JSON object with the following keys: "contractorName", "totalAmount", and "items". The "items" key should be an array of objects, where each object has a "description" and a "cost" key. If you cannot find a value for a field, set it to an empty string or 0.`;
         const userPrompt = `Here is the raw text from the estimate:\n\n${extractedText}`;
 
         const completion = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: userPrompt },
-            ],
+            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
             response_format: { type: "json_object" },
         });
 
         const structuredData = JSON.parse(completion.choices[0].message.content);
 
-        // --- Step 3: Save the structured bid to the database ---
         const newBid = new Bid({
             user: req.user.id,
             lead: leadId,
