@@ -23,7 +23,7 @@ require('./models/ProjectDocument');
 require('./models/MaintenanceTicket');
 require('./models/Inspection');
 require('./models/Lead');
-require('./models/UnitDocument'); // ✅ Added
+require('./models/Bid');
 // --- End of Model Registration ---
 
 // --- Route Imports ---
@@ -46,7 +46,8 @@ const inspectionRoutes = require("./routes/inspectionRoutes");
 const aiToolsRoutes = require("./routes/aiToolsRoutes");
 const leadRoutes = require("./routes/leadRoutes");
 const stripeRoutes = require("./routes/stripeRoutes");
-const unitDocumentRoutes = require("./routes/unitDocumentRoutes"); // ✅ Added
+// 1. IMPORT THE NEW BID ROUTES
+const bidRoutes = require("./routes/bidRoutes");
 const requireAuth = require("./middleware/requireAuth");
 
 require("./config/passport");
@@ -109,7 +110,9 @@ app.use("/api/inspections", requireAuth, inspectionRoutes);
 app.use("/api/ai-tools", requireAuth, aiToolsRoutes);
 app.use("/api/leads", requireAuth, leadRoutes);
 app.use("/api/stripe", requireAuth, stripeRoutes);
-app.use("/api/unit-documents", requireAuth, unitDocumentRoutes); // ✅ Added
+// 2. USE THE NEW BID ROUTES
+app.use("/api/bids", requireAuth, bidRoutes);
+
 
 // Start server
 const PORT = process.env.PORT || 5001;
