@@ -8,6 +8,15 @@ const userSchema = new mongoose.Schema(
     password: { type: String },
     googleId: { type: String },
     avatar: { type: String },
+    
+    // --- ✅ NEW: Fields for Stripe Connect ---
+    stripeAccountId: { 
+        type: String 
+    },
+    stripeOnboardingComplete: {
+        type: Boolean,
+        default: false
+    }
   },
   { timestamps: true }
 );

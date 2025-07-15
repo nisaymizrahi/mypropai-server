@@ -22,6 +22,7 @@ require('./models/ProjectTask');
 require('./models/ProjectDocument');
 require('./models/MaintenanceTicket');
 require('./models/Inspection');
+require('./models/Lead');
 // --- End of Model Registration ---
 
 // --- Route Imports ---
@@ -41,8 +42,10 @@ const dashboardRoutes = require("./routes/dashboardRoutes");
 const maintenanceRoutes = require("./routes/maintenanceRoutes");
 const operatingExpenseRoutes = require("./routes/operatingExpenseRoutes");
 const inspectionRoutes = require("./routes/inspectionRoutes");
-// 1. IMPORT THE NEW AI ROUTES
 const aiToolsRoutes = require("./routes/aiToolsRoutes");
+const leadRoutes = require("./routes/leadRoutes");
+// 1. IMPORT THE NEW STRIPE ROUTES
+const stripeRoutes = require("./routes/stripeRoutes");
 const requireAuth = require("./middleware/requireAuth");
 
 require("./config/passport");
@@ -102,8 +105,10 @@ app.use("/api/dashboard", requireAuth, dashboardRoutes);
 app.use("/api/maintenance", requireAuth, maintenanceRoutes);
 app.use("/api/operating-expenses", requireAuth, operatingExpenseRoutes);
 app.use("/api/inspections", requireAuth, inspectionRoutes);
-// 2. USE THE NEW AI ROUTES
 app.use("/api/ai-tools", requireAuth, aiToolsRoutes);
+app.use("/api/leads", requireAuth, leadRoutes);
+// 2. USE THE NEW STRIPE ROUTES
+app.use("/api/stripe", requireAuth, stripeRoutes);
 
 
 // Start server
