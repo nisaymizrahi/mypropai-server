@@ -6,6 +6,9 @@ const requireAuth = require('../middleware/requireAuth');
 // All routes in this file are protected
 router.use(requireAuth);
 
+// ✅ NEW: Route to get summary data for the leads dashboard
+router.get('/summary', leadController.getLeadSummary);
+
 // @route   POST /api/leads
 // @desc    Create a new lead
 router.post('/', leadController.createLead);

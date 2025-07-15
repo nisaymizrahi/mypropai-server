@@ -8,6 +8,34 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// ✅ NEW: Function to get summary data for the leads dashboard
+exports.getLeadSummary = async (req, res) => {
+    try {
+        const leads = await Lead.find({ user: req.user.id });
+
+        const totalLeads = leads.length;
+        const analyzingCount = leads.filter(l => l.status === 'Analyzing').length;
+        const underContractCount = leads.filter(l => l.status === 'Under Contract').length;
+        
+        const closedWon = leads.filter(l => l.status === 'Closed - Won').length;
+        const closedLost = leads.filter(l => l.status === 'Closed - Lost').length;
+        const totalClosed = closedWon + closedLost;
+        
+        const closingRatio = totalClosed > 0 ? (closedWon / totalClosed) * 100 : 0;
+
+        res.json({
+            totalLeads,
+            analyzingCount,
+            underContractCount,
+            closingRatio
+        });
+
+    } catch (error) {
+        console.error('Error fetching lead summary:', error);
+        res.status(500).json({ msg: 'Server Error' });
+    }
+};
+
 // @desc    Create a new lead
 exports.createLead = async (req, res) => {
     try {
@@ -40,7 +68,7 @@ exports.getLeads = async (req, res) => {
     }
 };
 
-// ✅ NEW: Function to get a single lead by its ID
+// @desc    Get a single lead by its ID
 exports.getLeadById = async (req, res) => {
     try {
         const lead = await Lead.findById(req.params.id);
