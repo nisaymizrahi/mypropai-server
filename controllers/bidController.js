@@ -18,7 +18,7 @@ exports.importBid = async (req, res) => {
             return res.status(401).json({ msg: 'Lead not found or user not authorized.' });
         }
 
-        // ✅ CORRECTED: Use URLSearchParams for the OCR.space API call
+        // ✅ CORRECTED: Sending the request as 'application/x-www-form-urlencoded'
         const ocrData = new URLSearchParams({
             url: req.file.path,
             isOverlayRequired: 'false',

@@ -1,5 +1,4 @@
 const Lead = require('../models/Lead');
-const Investment = require('../models/Investment');
 const OpenAI = require('openai');
 const axios = require('axios');
 
@@ -90,13 +89,12 @@ exports.analyzeComps = async (req, res) => {
         }
         
         // ✅ CORRECTED: Using the proper ATTOM API endpoint
-        const attomApiUrl = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/basicprofile`;
+        const attomApiUrl = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/snapshot`;
         const response = await axios.get(attomApiUrl, {
-            params: { address: lead.address },
+            params: { address: lead.address, radius: radius || 0.5 },
             headers: { 'apikey': process.env.ATTOM_API_KEY }
         });
         
-        // This is a placeholder for where real comp logic would go.
         const comps = response.data.property || [];
         if (comps.length === 0) {
             return res.status(404).json({ msg: 'No comparable properties found for this address.' });
