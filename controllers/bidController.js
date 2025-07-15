@@ -2,10 +2,10 @@ const Bid = require('../models/Bid');
 const Lead = require('../models/Lead');
 const OpenAI = require('openai');
 const axios = require('axios');
+const FormData = require('form-data');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// @desc    Upload an estimate, parse it with AI, and create a new bid
 exports.importBid = async (req, res) => {
     try {
         const { leadId } = req.body;
@@ -18,21 +18,20 @@ exports.importBid = async (req, res) => {
             return res.status(401).json({ msg: 'Lead not found or user not authorized.' });
         }
 
-        // ✅ CORRECTED: Sending the request as 'application/x-www-form-urlencoded'
-        const ocrData = new URLSearchParams({
-            url: req.file.path,
-            isOverlayRequired: 'false',
-            language: 'eng',
-            filetype: req.file.originalname.split('.').pop()
-        });
+        // --- Step 1: Call OCR.space API with the file buffer ---
+        const form = new FormData();
+        // ✅ THIS IS THE FIX: Send the file content directly from memory
+        form.append('file', req.file.buffer, { filename: req.file.originalname });
+        form.append('isOverlayRequired', 'false');
+        form.append('language', 'eng');
 
-        const ocrResponse = await axios.post('https://api.ocr.space/parse/image', ocrData, {
+        const ocrResponse = await axios.post('https://api.ocr.space/parse/image', form, {
             headers: {
                 'apikey': process.env.OCR_SPACE_API_KEY,
-                'Content-Type': 'application/x-www-form-urlencoded'
+                ...form.getHeaders(),
             },
         });
-
+        
         if (ocrResponse.data.IsErroredOnProcessing) {
             throw new Error(ocrResponse.data.ErrorMessage.join(', '));
         }
@@ -41,7 +40,8 @@ exports.importBid = async (req, res) => {
         if (!extractedText || extractedText.trim() === '') {
             throw new Error('OCR could not extract any text from the document.');
         }
-
+        
+        // --- Step 2: Send extracted text to OpenAI for structuring ---
         const systemPrompt = `You are an expert data extraction bot for real estate estimates. Analyze the following text extracted from a contractor's bid. Your task is to identify the contractor's name, the total bid amount, and all individual line items with their descriptions and costs. Structure your response as a valid JSON object with the following keys: "contractorName", "totalAmount", and "items". The "items" key should be an array of objects, where each object has a "description" and a "cost" key. If you cannot find a value for a field, set it to an empty string or 0.`;
         const userPrompt = `Here is the raw text from the estimate:\n\n${extractedText}`;
 
@@ -53,6 +53,7 @@ exports.importBid = async (req, res) => {
 
         const structuredData = JSON.parse(completion.choices[0].message.content);
 
+        // --- Step 3: Save the structured bid to the database ---
         const newBid = new Bid({
             user: req.user.id,
             lead: leadId,
@@ -70,7 +71,7 @@ exports.importBid = async (req, res) => {
     }
 };
 
-// @desc    Get all bids for a specific lead
+// --- Other functions (getBidsForLead, deleteBid) remain the same ---
 exports.getBidsForLead = async (req, res) => {
     try {
         const { leadId } = req.params;
@@ -86,7 +87,6 @@ exports.getBidsForLead = async (req, res) => {
     }
 };
 
-// @desc    Delete a bid
 exports.deleteBid = async (req, res) => {
     try {
         const bid = await Bid.findById(req.params.id);
