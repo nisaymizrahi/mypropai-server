@@ -23,6 +23,7 @@ require('./models/ProjectDocument');
 require('./models/MaintenanceTicket');
 require('./models/Inspection');
 require('./models/Lead');
+require('./models/UnitDocument'); // ✅ Added
 // --- End of Model Registration ---
 
 // --- Route Imports ---
@@ -44,8 +45,8 @@ const operatingExpenseRoutes = require("./routes/operatingExpenseRoutes");
 const inspectionRoutes = require("./routes/inspectionRoutes");
 const aiToolsRoutes = require("./routes/aiToolsRoutes");
 const leadRoutes = require("./routes/leadRoutes");
-// 1. IMPORT THE NEW STRIPE ROUTES
 const stripeRoutes = require("./routes/stripeRoutes");
+const unitDocumentRoutes = require("./routes/unitDocumentRoutes"); // ✅ Added
 const requireAuth = require("./middleware/requireAuth");
 
 require("./config/passport");
@@ -107,9 +108,8 @@ app.use("/api/operating-expenses", requireAuth, operatingExpenseRoutes);
 app.use("/api/inspections", requireAuth, inspectionRoutes);
 app.use("/api/ai-tools", requireAuth, aiToolsRoutes);
 app.use("/api/leads", requireAuth, leadRoutes);
-// 2. USE THE NEW STRIPE ROUTES
 app.use("/api/stripe", requireAuth, stripeRoutes);
-
+app.use("/api/unit-documents", requireAuth, unitDocumentRoutes); // ✅ Added
 
 // Start server
 const PORT = process.env.PORT || 5001;
