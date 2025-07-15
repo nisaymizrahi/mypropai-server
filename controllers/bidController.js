@@ -2,7 +2,8 @@ const Bid = require('../models/Bid');
 const Lead = require('../models/Lead');
 const OpenAI = require('openai');
 const axios = require('axios');
-const FormData = require('form-data');
+// We no longer need the form-data library for this function
+// const FormData = require('form-data'); 
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -23,20 +24,15 @@ exports.importBid = async (req, res) => {
         }
 
         // --- Step 1: Call OCR.space API to extract text from the file ---
-        const form = new FormData();
-        form.append('url', req.file.path); // Use the URL from Cloudinary
-        
-        // ✅ THIS IS THE FIX: Tell the OCR service what kind of file it is.
-        const fileExtension = req.file.originalname.split('.').pop();
-        form.append('filetype', fileExtension);
-        
-        form.append('isOverlayRequired', 'false');
-        form.append('language', 'eng');
-
-        const ocrResponse = await axios.post('https://api.ocr.space/parse/image', form, {
+        // ✅ THIS IS THE FIX: We are now sending the request as application/x-www-form-urlencoded
+        const ocrResponse = await axios.post('https://api.ocr.space/parse/image', new URLSearchParams({
+            url: req.file.path,
+            isOverlayRequired: 'false',
+            language: 'eng',
+        }), {
             headers: {
                 'apikey': process.env.OCR_SPACE_API_KEY,
-                ...form.getHeaders()
+                'Content-Type': 'application/x-www-form-urlencoded'
             },
         });
         
