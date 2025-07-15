@@ -1,24 +1,22 @@
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/requireAuth');
-const upload = require('../middleware/upload'); 
+const { uploadToCloudinary } = require('../middleware/upload'); // ✅ Corrected import
 const managementController = require('../controllers/managementController');
-
-console.log("✅ management.js routes file LOADED ✅");
 
 // --- Property Level Routes ---
 router.post('/promote/:investmentId', auth, managementController.promoteInvestment);
 router.get('/', auth, managementController.getManagedProperties);
 router.get('/unmanaged-properties', auth, managementController.getUnmanagedProperties);
-
-// ✅ FIX: Place both under /property/:id to prevent route collisions
-router.get('/property/:propertyId/archived-leases', auth, managementController.getArchivedLeases);
 router.get('/property/:propertyId', auth, managementController.getManagedPropertyById);
+router.get('/property/:propertyId/archived-leases', auth, managementController.getArchivedLeases);
+
 
 // --- Unit Level Routes ---
 router.post('/:propertyId/units', auth, managementController.addUnitToProperty);
 router.get('/units/:unitId', auth, managementController.getUnitById);
 router.post('/units/:unitId/lease', auth, managementController.addLeaseToUnit);
+
 
 // --- Lease Level Routes ---
 router.get('/leases/:leaseId', auth, managementController.getLeaseById);
@@ -28,12 +26,13 @@ router.post('/recurring/run', auth, managementController.runRecurringChargesForT
 router.post('/leases/:leaseId/send-invite', auth, managementController.sendTenantInvite);
 router.post('/leases/:leaseId/archive', auth, managementController.archiveLease);
 
+
 // --- Communication Routes ---
 router.get('/leases/:leaseId/communications', auth, managementController.getCommunicationsForLease);
 router.post(
   '/leases/:leaseId/communications',
   auth,
-  upload.single('attachment'),
+  uploadToCloudinary.single('attachment'), // ✅ Use correct uploader
   managementController.addCommunicationToLease
 );
 router.patch(
@@ -48,13 +47,10 @@ router.put(
 );
 router.delete('/leases/:leaseId/communications/:commId', auth, managementController.deleteCommunicationFromLease);
 
+
 // --- Listing & Marketing Routes (Now Per-Unit) ---
 router.patch('/units/:unitId/listing', auth, managementController.updateListingDetails);
-router.post('/units/:unitId/listing/photos', auth, upload.array('photos', 10), managementController.addListingPhotos);
+router.post('/units/:unitId/listing/photos', auth, uploadToCloudinary.array('photos', 10), managementController.addListingPhotos); // ✅ Use correct uploader
 router.delete('/units/:unitId/listing/photos/:photoId', auth, managementController.deleteListingPhoto);
-
-router.post('/units/:unitId/documents', auth, upload.single('file'), managementController.uploadUnitDocument);
-router.get('/units/:unitId/documents', auth, managementController.getUnitDocuments);
-router.delete('/documents/:docId', auth, managementController.deleteUnitDocument);
 
 module.exports = router;
