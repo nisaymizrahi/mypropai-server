@@ -2,14 +2,14 @@ const express = require('express');
 const router = express.Router();
 const maintenanceController = require('../controllers/maintenanceController');
 const requireAuth = require('../middleware/requireAuth');
-const upload = require('../middleware/upload');
+const { uploadToCloudinary } = require('../middleware/upload'); // Corrected import
 
 // All routes in this file are protected
 router.use(requireAuth);
 
 // @route   POST /api/maintenance
 // @desc    Create a new maintenance ticket
-router.post('/', upload.array('photos', 5), maintenanceController.createTicket);
+router.post('/', uploadToCloudinary.array('photos', 5), maintenanceController.createTicket); // Use correct uploader
 
 // @route   GET /api/maintenance/property/:propertyId
 // @desc    Get all tickets for a specific property
