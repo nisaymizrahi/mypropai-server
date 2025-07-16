@@ -27,5 +27,6 @@ router.delete('/leases/:leaseId/communications/:commId', auth, managementControl
 router.patch('/units/:unitId/listing', auth, managementController.updateListingDetails);
 router.post('/units/:unitId/listing/photos', auth, uploadToCloudinary.array('photos', 10), managementController.addListingPhotos);
 router.delete('/units/:unitId/listing/photos/:photoId', auth, managementController.deleteListingPhoto);
+router.get('/units/vacant', managementController.getVacantUnits);
 
 module.exports = router;

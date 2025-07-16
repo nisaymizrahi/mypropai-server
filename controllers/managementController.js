@@ -762,3 +762,16 @@ exports.deleteUnitDocument = async (req, res) => {
     res.status(500).json({ msg: 'Server error deleting document.' });
   }
 };
+
+exports.getVacantUnits = async (req, res) => {
+  try {
+    const properties = await ManagedProperty.find({ user: req.user.id });
+    const propertyIds = properties.map(p => p._id);
+    const units = await Unit.find({ property: { $in: propertyIds }, isVacant: true })
+      .populate('property', 'name address');
+    res.json(units);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: 'Failed to fetch vacant units' });
+  }
+};
