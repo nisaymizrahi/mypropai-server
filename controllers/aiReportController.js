@@ -1,16 +1,14 @@
 const Investment = require("../models/Investment");
-const { Configuration, OpenAIApi } = require("openai");
+const OpenAI = require("openai");
 
-const configuration = new Configuration({
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
-const openai = new OpenAIApi(configuration);
 
 exports.generateAIReport = async (req, res) => {
   try {
     const { id } = req.params;
     const investment = await Investment.findOne({ _id: id, user: req.user.id });
-
     if (!investment) return res.status(404).json({ message: "Investment not found" });
 
     const summaryPrompt = `You are a real estate analyst. Based on the following investment data, generate a professional report:
@@ -34,7 +32,7 @@ Please return a 3-part summary:
 
 Use bullet points and keep it professional.`;
 
-    const completion = await openai.createChatCompletion({
+    const completion = await openai.chat.completions.create({
       model: "gpt-4",
       messages: [
         { role: "system", content: "You are a real estate investment assistant." },
@@ -44,7 +42,7 @@ Use bullet points and keep it professional.`;
       temperature: 0.7,
     });
 
-    const report = completion.data.choices[0].message.content;
+    const report = completion.choices[0].message.content;
     res.json({ report });
   } catch (err) {
     console.error("AI Report Error:", err);
