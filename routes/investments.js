@@ -3,6 +3,7 @@ const router = express.Router();
 const Investment = require("../models/Investment");
 const ProjectTask = require("../models/ProjectTask");
 const requireAuth = require("../middleware/requireAuth");
+const { generateAIReport } = require("../controllers/aiReportController");
 
 // Helper to calculate task completion percentage
 const calculateProgress = async (investmentId) => {
@@ -12,7 +13,7 @@ const calculateProgress = async (investmentId) => {
   return Math.round((completed / tasks.length) * 100);
 };
 
-// GET all investments with analytics
+// GET all investments
 router.get("/", requireAuth, async (req, res) => {
   try {
     const investments = await Investment.find({ user: req.user.id }).sort({ createdAt: -1 });
@@ -58,7 +59,7 @@ router.post("/", requireAuth, async (req, res) => {
   }
 });
 
-// UPDATE investment
+// PATCH investment
 router.patch("/:id", requireAuth, async (req, res) => {
   try {
     const investment = await Investment.findOneAndUpdate(
@@ -83,5 +84,8 @@ router.delete("/:id", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Failed to delete investment" });
   }
 });
+
+// ✅ NEW: Generate AI Report
+router.post("/generate-report/:id", requireAuth, generateAIReport);
 
 module.exports = router;
