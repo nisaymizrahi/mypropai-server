@@ -4,6 +4,7 @@ const Investment = require("../models/Investment");
 const ProjectTask = require("../models/ProjectTask");
 const requireAuth = require("../middleware/requireAuth");
 const { generateAIReport } = require("../controllers/aiReportController");
+const { generateBudgetLines } = require("../controllers/aiBudgetController");
 
 // Helper to calculate task completion percentage
 const calculateProgress = async (investmentId) => {
@@ -87,5 +88,7 @@ router.delete("/:id", requireAuth, async (req, res) => {
 
 // ✅ NEW: Generate AI Report
 router.post("/generate-report/:id", requireAuth, generateAIReport);
+
+router.post("/generate-budget-lines", requireAuth, generateBudgetLines);
 
 module.exports = router;
