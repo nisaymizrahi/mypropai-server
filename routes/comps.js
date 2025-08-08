@@ -1,8 +1,9 @@
+// server/routes/comps.js
 const express = require("express");
 const axios = require("axios");
 const router = express.Router();
 
-// FIXED: This route now correctly accepts latitude and longitude
+// Accepts: GET /api/comps?lat=...&lng=...&radius=1
 router.get("/", async (req, res) => {
   const { lat, lng, radius = 1 } = req.query;
 
@@ -17,38 +18,41 @@ router.get("/", async (req, res) => {
   }
 
   try {
-    // Use coordinates to find comparable sales history from Attom
-    const salesHistoryResponse = await axios.get('https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/saleshistory', {
+    const salesHistoryResponse = await axios.get(
+      "https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/saleshistory",
+      {
         params: {
-            latitude: lat,
-            longitude: lng,
-            radius,
-            orderBy: "saleDate desc",
-            pageSize: 40
+          latitude: lat,
+          longitude: lng,
+          radius,
+          orderBy: "saleDate desc",
+          pageSize: 40,
         },
-        headers: { 'apikey': ATTOM_API_KEY, 'Accept': 'application/json' }
-    });
+        headers: { apikey: ATTOM_API_KEY, Accept: "application/json" },
+      }
+    );
 
     const sales = salesHistoryResponse.data?.property || [];
-    
-    // Transform the Attom data to match what the frontend expects
-    const formattedComps = sales.map(prop => ({
-        id: prop.identifier.attomId,
-        address: `${prop.address.line1}, ${prop.address.locality}, ${prop.address.countrySubd} ${prop.address.postal1}`,
-        beds: prop.building?.rooms?.beds,
-        baths: prop.building?.rooms?.bathsFull,
-        sqft: prop.building?.size?.bldgsize,
-        price: prop.sale?.amount,
-        saleDate: prop.sale?.saleDate,
-        lat: prop.location.latitude,
-        lng: prop.location.longitude,
-        distance: prop.location.distance
+
+    const formattedComps = sales.map((prop) => ({
+      id: prop.identifier.attomId,
+      address: `${prop.address.line1}, ${prop.address.locality}, ${prop.address.countrySubd} ${prop.address.postal1}`,
+      beds: prop.building?.rooms?.beds,
+      baths: prop.building?.rooms?.bathsFull,
+      sqft: prop.building?.size?.bldgsize,
+      price: prop.sale?.amount,
+      saleDate: prop.sale?.saleDate,
+      lat: prop.location.latitude,
+      lng: prop.location.longitude,
+      distance: prop.location.distance,
     }));
 
     res.json(formattedComps);
-
   } catch (error) {
-    console.error("Error fetching comps from Attom API:", error.response ? error.response.data : error.message);
+    console.error(
+      "Error fetching comps from Attom API:",
+      error.response ? error.response.data : error.message
+    );
     res.status(500).json({ message: "Failed to fetch comps from the Attom API." });
   }
 });
