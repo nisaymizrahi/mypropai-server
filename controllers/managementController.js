@@ -767,7 +767,7 @@ exports.getVacantUnits = async (req, res) => {
   try {
     const properties = await ManagedProperty.find({ user: req.user.id });
     const propertyIds = properties.map(p => p._id);
-    const units = await Unit.find({ property: { $in: propertyIds }, isVacant: true })
+    const units = await Unit.find({ property: { $in: propertyIds }, status: 'Vacant' })
       .populate('property', 'name address');
     res.json(units);
   } catch (err) {

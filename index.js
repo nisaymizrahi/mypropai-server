@@ -40,6 +40,7 @@ const expenseRoutes = require("./routes/expenseRoutes");
 const vendorRoutes = require("./routes/vendorRoutes");
 const projectTaskRoutes = require("./routes/projectTaskRoutes");
 const documentRoutes = require("./routes/documentRoutes");
+const unitDocumentRoutes = require("./routes/unitDocumentRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const maintenanceRoutes = require("./routes/maintenanceRoutes");
 const operatingExpenseRoutes = require("./routes/operatingExpenseRoutes");
@@ -48,6 +49,7 @@ const aiToolsRoutes = require("./routes/aiToolsRoutes");
 const leadRoutes = require("./routes/leadRoutes");
 const stripeRoutes = require("./routes/stripeRoutes");
 const bidRoutes = require("./routes/bidRoutes");
+const notificationRoutes = require("./routes/notifications");
 // 1. IMPORT THE NEW APPLICATION ROUTES
 const applicationRoutes = require("./routes/applicationRoutes");
 const requireAuth = require("./middleware/requireAuth");
@@ -105,6 +107,7 @@ app.use("/api/expenses", requireAuth, expenseRoutes);
 app.use("/api/vendors", requireAuth, vendorRoutes);
 app.use("/api/project-tasks", requireAuth, projectTaskRoutes);
 app.use("/api/documents", requireAuth, documentRoutes);
+app.use("/api/managed-documents", unitDocumentRoutes);
 app.use("/api/dashboard", requireAuth, dashboardRoutes);
 app.use("/api/maintenance", requireAuth, maintenanceRoutes);
 app.use("/api/operating-expenses", requireAuth, operatingExpenseRoutes);
@@ -113,6 +116,7 @@ app.use("/api/ai-tools", requireAuth, aiToolsRoutes);
 app.use("/api/leads", requireAuth, leadRoutes);
 app.use("/api/stripe", requireAuth, stripeRoutes);
 app.use("/api/bids", requireAuth, bidRoutes);
+app.use("/api/notifications", notificationRoutes);
 // 2. USE THE NEW APPLICATION ROUTES
 app.use("/api/applications", applicationRoutes); // Note: Auth is handled inside the routes file
 
