@@ -14,8 +14,13 @@ const userSchema = new mongoose.Schema(
         type: String 
     },
     stripeOnboardingComplete: {
-        type: Boolean,
-        default: false
+      type: Boolean,
+      default: false
+    },
+    applicationFeeCents: {
+      type: Number,
+      default: 5000,
+      min: 0,
     },
 
     // Platform billing fields

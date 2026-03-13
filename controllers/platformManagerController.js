@@ -1,5 +1,3 @@
-const jwt = require('jsonwebtoken');
-
 const Application = require('../models/Application');
 const Bid = require('../models/Bid');
 const Inspection = require('../models/Inspection');
@@ -14,9 +12,8 @@ const Tenant = require('../models/Tenant');
 const User = require('../models/User');
 const Vendor = require('../models/Vendor');
 const { getEffectiveSubscriptionState } = require('../utils/billingAccess');
+const { signJwt } = require('../utils/jwtConfig');
 const { normalizeEmail } = require('../utils/platformAccess');
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 const IMPERSONATION_TOKEN_TTL = '2h';
 
 const USER_RELATED_MODELS = [
@@ -223,14 +220,13 @@ exports.createImpersonationSession = async (req, res) => {
       return res.status(403).json({ msg: 'Reactivate this user before impersonating their workspace.' });
     }
 
-    const token = jwt.sign(
+    const token = signJwt(
       {
         userId: targetUser._id,
         actorUserId: req.user._id,
         actorEmail: normalizeEmail(req.user.email),
         impersonation: true,
       },
-      JWT_SECRET,
       { expiresIn: IMPERSONATION_TOKEN_TTL }
     );
 

@@ -86,6 +86,7 @@ exports.getManagedPropertyById = async (req, res) => {
   try {
     const property = await ManagedProperty.findById(req.params.propertyId)
       .populate({ path: 'units', populate: { path: 'currentLease', populate: { path: 'tenant' } } })
+      .populate('property')
       .populate('investment');
     if (!property) return res.status(404).json({ msg: 'Property not found' });
     if (property.user.toString() !== req.user.id) return res.status(401).json({ msg: 'User not authorized' });
@@ -364,7 +365,7 @@ exports.sendTenantInvite = async (req, res) => {
         const { leaseId } = req.params;
         // The query is now updated to populate all necessary data
         const lease = await Lease.findById(leaseId)
-            .populate('tenant', 'fullName email')
+            .populate('tenant', 'fullName email user')
             .populate({
                 path: 'unit',
                 select: 'name property',
@@ -376,6 +377,10 @@ exports.sendTenantInvite = async (req, res) => {
 
         if (!lease || !lease.tenant || !lease.unit || !lease.unit.property) {
             return res.status(404).json({ msg: 'Lease, tenant, or property data not found.' });
+        }
+
+        if (!lease.tenant.user || lease.tenant.user.toString() !== req.user.id) {
+            return res.status(401).json({ msg: 'Unauthorized' });
         }
 
         let tenantUser = await TenantUser.findOne({ email: lease.tenant.email });

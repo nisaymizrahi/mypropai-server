@@ -11,6 +11,15 @@ const VALID_MANAGER_DECISIONS = new Set(['Approved', 'Denied']);
 const VALID_INVITE_SCOPES = new Set(['portfolio', 'property', 'unit']);
 const APPLICATION_INVITE_KIND = 'application_invite';
 const APPLICATION_INVITE_TTL = '365d';
+const resolveApplicationFeeCents = (owner) => {
+  const feeCents = Number(owner?.applicationFeeCents);
+
+  if (!Number.isFinite(feeCents) || feeCents < 0) {
+    return APPLICATION_FEE_CENTS;
+  }
+
+  return Math.round(feeCents);
+};
 
 const getAuthorizedApplication = async (applicationId, userId) => {
   const application = await Application.findById(applicationId);
@@ -118,7 +127,7 @@ const resolveLegacyUnitContext = async (unitId) => {
   }
 
   const owner = await User.findById(unit.property.user).select(
-    'name email stripeAccountId stripeOnboardingComplete'
+    'name email stripeAccountId stripeOnboardingComplete applicationFeeCents'
   );
 
   if (!owner) {
@@ -139,7 +148,7 @@ const resolveLegacyUnitContext = async (unitId) => {
 const resolveInviteContext = async (inviteToken) => {
   const payload = verifyInviteToken(inviteToken);
   const owner = await User.findById(payload.ownerId).select(
-    'name email stripeAccountId stripeOnboardingComplete'
+    'name email stripeAccountId stripeOnboardingComplete applicationFeeCents'
   );
 
   if (!owner) {
@@ -228,6 +237,7 @@ const createCheckoutSessionForApplication = async (
   }
 
   const frontendBase = getFrontendBase();
+  const applicationFeeCents = resolveApplicationFeeCents(owner);
   const propertyAddress = property?.address || application.propertyAddressSnapshot || 'Rental application';
   const unitName = unit?.name || application.unitNameSnapshot || '';
   const unitLabel = unitName ? ` - ${unitName}` : '';
@@ -263,7 +273,7 @@ const createCheckoutSessionForApplication = async (
           quantity: 1,
           price_data: {
             currency: 'usd',
-            unit_amount: APPLICATION_FEE_CENTS,
+            unit_amount: applicationFeeCents,
             product_data: {
               name: `Rental application fee${unitLabel}`,
               description: propertyAddress,
@@ -326,8 +336,8 @@ const buildPublicApplicationResponse = (context) => {
     unitName,
     title: copy.title,
     summary: copy.summary,
-    applicationFee: APPLICATION_FEE_CENTS / 100,
-    applicationFeeCents: APPLICATION_FEE_CENTS,
+    applicationFee: resolveApplicationFeeCents(context.owner) / 100,
+    applicationFeeCents: resolveApplicationFeeCents(context.owner),
   };
 };
 
@@ -473,7 +483,7 @@ exports.submitApplication = async (req, res) => {
     await newApplication.save();
 
     const owner = await User.findById(context.owner._id).select(
-      'name email stripeAccountId stripeOnboardingComplete'
+      'name email stripeAccountId stripeOnboardingComplete applicationFeeCents'
     );
     let payment = {
       checkoutUrl: null,
@@ -525,7 +535,7 @@ exports.createPaymentIntent = async (req, res) => {
       : null;
 
     const owner = await User.findById(application.user).select(
-      'name email stripeAccountId stripeOnboardingComplete'
+      'name email stripeAccountId stripeOnboardingComplete applicationFeeCents'
     );
     const payment = await createCheckoutSessionForApplication(application, owner, {
       property: property || unit?.property || null,

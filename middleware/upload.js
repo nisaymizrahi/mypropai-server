@@ -36,7 +36,7 @@ cloudinary.config({
 const cloudinaryStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
-    folder: 'mypropai-uploads',
+    folder: 'fliprop-uploads',
     allowed_formats: ['jpeg', 'jpg', 'png', 'pdf', 'mp4', 'mov'],
     resource_type: 'auto',
   },

@@ -14,7 +14,7 @@ const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: (req, file) => {
     // NEW: This is now a function to dynamically set parameters
-    let folder = 'mypropai_receipts';
+    let folder = 'fliprop_receipts';
     let resource_type = 'auto'; // Let Cloudinary auto-detect
 
     // Be more specific for PDFs to ensure they are treated as raw files

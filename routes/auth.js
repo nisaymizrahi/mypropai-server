@@ -3,7 +3,7 @@ const passport = require("passport");
 const router = express.Router();
 const authController = require('../controllers/authController');
 const requireAuth = require('../middleware/requireAuth');
-const jwt = require('jsonwebtoken');
+const { signJwt } = require('../utils/jwtConfig');
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
@@ -37,7 +37,7 @@ router.get(
         return res.redirect(`${FRONTEND_URL}/login?error=suspended`);
       }
 
-      const token = jwt.sign({ userId: req.user._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
+      const token = signJwt({ userId: req.user._id }, { expiresIn: "7d" });
       const encodedToken = encodeURIComponent(token);
       const redirectUrl = `${FRONTEND_URL}/login-continue#token=${encodedToken}`;
       res.redirect(redirectUrl);

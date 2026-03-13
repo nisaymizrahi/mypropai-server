@@ -1,7 +1,7 @@
-const jwt = require("jsonwebtoken");
 const mongoose = require('mongoose');
 const User = mongoose.model('User');
 const redisClient = require('../config/redisClient'); // 1. IMPORT REDIS CLIENT
+const { verifyJwt } = require('../utils/jwtConfig');
 const { isPlatformManager } = require('../utils/platformAccess');
 
 const requireAuth = async (req, res, next) => {
@@ -20,7 +20,7 @@ const requireAuth = async (req, res, next) => {
       return res.status(401).json({ error: "Token has been invalidated" });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = verifyJwt(token);
     
     const user = await User.findById(decoded.userId).select("-password");
     if (!user) {

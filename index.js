@@ -62,6 +62,7 @@ const applicationRoutes = require("./routes/applicationRoutes");
 const billingController = require("./controllers/billingController");
 const stripeController = require("./controllers/stripeController");
 const requireAuth = require("./middleware/requireAuth");
+const { getJwtSecret } = require("./utils/jwtConfig");
 
 require("./config/passport");
 
@@ -136,7 +137,7 @@ app.use(cookieParser());
 
 app.use(
   session({
-    secret: process.env.JWT_SECRET,
+    secret: getJwtSecret(),
     resave: false,
     saveUninitialized: false,
     cookie: {

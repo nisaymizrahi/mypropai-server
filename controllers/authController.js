@@ -1,11 +1,9 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const redisClient = require('../config/redisClient');
 const { getEffectiveSubscriptionState } = require('../utils/billingAccess');
+const { signJwt } = require('../utils/jwtConfig');
 const { isPlatformManager } = require('../utils/platformAccess');
-
-const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 
 const buildAuthUser = (user, options = {}) => {
   const impersonation = options.impersonation || { active: false };
@@ -19,6 +17,7 @@ const buildAuthUser = (user, options = {}) => {
     accountStatus: user.accountStatus || 'active',
     stripeAccountId: user.stripeAccountId || null,
     stripeOnboardingComplete: Boolean(user.stripeOnboardingComplete),
+    applicationFeeCents: Number.isFinite(user.applicationFeeCents) ? user.applicationFeeCents : 5000,
     stripeCustomerId: user.stripeCustomerId || null,
     stripeSubscriptionId: user.stripeSubscriptionId || null,
     subscriptionPlan: subscriptionState.planKey,
@@ -33,7 +32,7 @@ const buildAuthUser = (user, options = {}) => {
 
 // Helper function to generate a token
 const generateToken = (user, payload = {}, expiresIn = '7d') => {
-  return jwt.sign({ userId: user._id, ...payload }, JWT_SECRET, { expiresIn });
+  return signJwt({ userId: user._id, ...payload }, { expiresIn });
 };
 
 // @desc    Register a new user
@@ -127,7 +126,7 @@ exports.getMe = async (req, res) => {
 // @desc    Update the logged-in user's profile
 exports.updateMe = async (req, res) => {
     try {
-        const { name, email } = req.body;
+        const { name, email, applicationFeeCents } = req.body;
         const user = await User.findById(req.user.id);
 
         if (!user) {
@@ -136,6 +135,18 @@ exports.updateMe = async (req, res) => {
 
         user.name = name || user.name;
         user.email = email || user.email;
+
+        if (applicationFeeCents !== undefined) {
+            const normalizedFee = Number(applicationFeeCents);
+
+            if (!Number.isFinite(normalizedFee) || normalizedFee < 0 || normalizedFee > 100000) {
+                return res.status(400).json({
+                    message: "Application fee must be between $0 and $1,000.",
+                });
+            }
+
+            user.applicationFeeCents = Math.round(normalizedFee);
+        }
 
         const updatedUser = await user.save();
 

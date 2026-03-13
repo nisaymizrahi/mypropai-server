@@ -1,5 +1,5 @@
 const TenantUser = require('../models/TenantUser');
-const jwt = require('jsonwebtoken');
+const { signJwt } = require('../utils/jwtConfig');
 const { hashToken } = require('../utils/tokenSecurity');
 
 // @desc    Allow a tenant to set their password using an invitation token
@@ -68,11 +68,7 @@ exports.loginTenant = async (req, res) => {
         };
 
         // Sign the token
-        const token = jwt.sign(
-            payload,
-            process.env.JWT_SECRET,
-            { expiresIn: '30d' }
-        );
+        const token = signJwt(payload, { expiresIn: '30d' });
 
         res.status(200).json({ token });
 
