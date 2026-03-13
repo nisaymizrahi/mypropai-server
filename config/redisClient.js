@@ -1,28 +1,41 @@
 const redis = require('redis');
 
-// Create the Redis client
-const redisClient = redis.createClient({
-  url: process.env.REDIS_URL
-});
+let redisClient;
 
-// Set up event listeners for the connection
-redisClient.on('connect', () => {
-  console.log('Connecting to Redis...');
-});
+if (!process.env.REDIS_URL) {
+  console.warn('REDIS_URL is not configured. Continuing without Redis token blocklisting.');
+  redisClient = {
+    isReady: false,
+    async get() {
+      return null;
+    },
+    async set() {
+      return null;
+    },
+  };
+} else {
+  // Create the Redis client
+  redisClient = redis.createClient({
+    url: process.env.REDIS_URL,
+  });
 
-redisClient.on('ready', () => {
-  console.log('✅ Redis client connected and ready to use.');
-});
+  // Set up event listeners for the connection
+  redisClient.on('connect', () => {
+    console.log('Connecting to Redis...');
+  });
 
-redisClient.on('error', (err) => {
-  console.error('Redis connection error:', err);
-});
+  redisClient.on('ready', () => {
+    console.log('Redis client connected and ready to use.');
+  });
 
-// Connect to the Redis server.
-// We wrap this in an async function to use top-level await.
-(async () => {
-  await redisClient.connect();
-})();
+  redisClient.on('error', (err) => {
+    console.error('Redis connection error:', err);
+  });
 
+  // Connect lazily and fail soft so auth can still work without Redis.
+  redisClient.connect().catch((err) => {
+    console.error('Redis connection failed:', err);
+  });
+}
 
 module.exports = redisClient;

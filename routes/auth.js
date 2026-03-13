@@ -5,32 +5,41 @@ const authController = require('../controllers/authController');
 const requireAuth = require('../middleware/requireAuth');
 const jwt = require('jsonwebtoken');
 
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
 // --- Email & Password ---
 router.post("/signup", authController.signup);
 router.post("/login", authController.login);
 router.post("/logout", requireAuth, authController.logout);
 
 // --- Google OAuth ---
-router.get("/google", passport.authenticate("google", { scope: ["profile", "email"] }));
+router.get(
+  "/google",
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+    state: true,
+  })
+);
 
 router.get(
   "/google/callback",
-  passport.authenticate("google", { session: false, failureRedirect: "/login" }),
+  passport.authenticate("google", {
+    session: false,
+    failureRedirect: `${FRONTEND_URL}/login?error=oauth`,
+  }),
   (req, res) => {
     try {
       if (!req.user) {
-        return res.redirect("https://mypropai.onrender.com/login?error=nouser");
+        return res.redirect(`${FRONTEND_URL}/login?error=nouser`);
       }
-      
-      console.log('User object from Google/Passport:', req.user);
 
       const token = jwt.sign({ userId: req.user._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
       const encodedToken = encodeURIComponent(token);
-      const redirectUrl = `https://mypropai.onrender.com/login-continue?token=${encodedToken}`;
+      const redirectUrl = `${FRONTEND_URL}/login-continue#token=${encodedToken}`;
       res.redirect(redirectUrl);
     } catch (err) {
       console.error("Google login callback error:", err);
-      res.redirect("https://mypropai.onrender.com/login?error=token");
+      res.redirect(`${FRONTEND_URL}/login?error=token`);
     }
   }
 );

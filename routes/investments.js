@@ -5,6 +5,7 @@ const ProjectTask = require("../models/ProjectTask");
 const requireAuth = require("../middleware/requireAuth");
 const { generateAIReport } = require("../controllers/aiReportController");
 const { generateBudgetLines } = require("../controllers/aiBudgetController");
+const { normalizePropertyStrategy } = require("../utils/propertyStrategy");
 
 // Helper to calculate task completion percentage
 const calculateProgress = async (investmentId) => {
@@ -14,6 +15,28 @@ const calculateProgress = async (investmentId) => {
   return Math.round((completed / tasks.length) * 100);
 };
 
+const serializeInvestment = (investment, progress) => {
+  const serialized = investment.toObject();
+  const strategy = normalizePropertyStrategy(serialized.strategy || serialized.type);
+
+  return {
+    ...serialized,
+    type: strategy,
+    strategy,
+    progress,
+  };
+};
+
+const buildInvestmentPayload = (input = {}) => {
+  const payload = { ...input };
+  const strategy = normalizePropertyStrategy(input.strategy || input.type);
+
+  payload.strategy = strategy;
+  payload.type = strategy;
+
+  return payload;
+};
+
 // GET all investments
 router.get("/", requireAuth, async (req, res) => {
   try {
@@ -21,10 +44,7 @@ router.get("/", requireAuth, async (req, res) => {
 
     const enriched = await Promise.all(investments.map(async (inv) => {
       const progress = await calculateProgress(inv._id);
-      return {
-        ...inv.toObject(),
-        progress
-      };
+      return serializeInvestment(inv, progress);
     }));
 
     res.json(enriched);
@@ -40,10 +60,7 @@ router.get("/:id", requireAuth, async (req, res) => {
     if (!investment) return res.status(404).json({ message: "Not found" });
 
     const progress = await calculateProgress(investment._id);
-    investment.progress = progress;
-    await investment.save();
-
-    res.json(investment);
+    res.json(serializeInvestment(investment, progress));
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }
@@ -52,9 +69,9 @@ router.get("/:id", requireAuth, async (req, res) => {
 // CREATE investment
 router.post("/", requireAuth, async (req, res) => {
   try {
-    const data = req.body;
+    const data = buildInvestmentPayload(req.body);
     const investment = await Investment.create({ ...data, user: req.user.id });
-    res.status(201).json(investment);
+    res.status(201).json(serializeInvestment(investment, 0));
   } catch (err) {
     res.status(500).json({ error: "Failed to create investment" });
   }
@@ -63,13 +80,15 @@ router.post("/", requireAuth, async (req, res) => {
 // PATCH investment
 router.patch("/:id", requireAuth, async (req, res) => {
   try {
+    const updates = buildInvestmentPayload(req.body);
     const investment = await Investment.findOneAndUpdate(
       { _id: req.params.id, user: req.user.id },
-      { $set: req.body },
+      { $set: updates },
       { new: true }
     );
     if (!investment) return res.status(404).json({ message: "Not found" });
-    res.json(investment);
+    const progress = await calculateProgress(investment._id);
+    res.json(serializeInvestment(investment, progress));
   } catch (err) {
     res.status(500).json({ error: "Failed to update investment" });
   }

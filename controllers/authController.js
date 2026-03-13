@@ -5,6 +5,20 @@ const redisClient = require('../config/redisClient');
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 
+const buildAuthUser = (user) => ({
+  id: user._id,
+  name: user.name,
+  email: user.email,
+  avatar: user.avatar,
+  stripeAccountId: user.stripeAccountId || null,
+  stripeOnboardingComplete: Boolean(user.stripeOnboardingComplete),
+  stripeCustomerId: user.stripeCustomerId || null,
+  stripeSubscriptionId: user.stripeSubscriptionId || null,
+  subscriptionPlan: user.subscriptionPlan || 'free',
+  subscriptionStatus: user.subscriptionStatus || 'inactive',
+  subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd || null,
+});
+
 // Helper function to generate a token
 const generateToken = (user) => {
   return jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
@@ -17,8 +31,8 @@ exports.signup = async (req, res) => {
     if (!email || !password || !name) {
         return res.status(400).json({ message: "All fields are required" });
     }
-    if (password.length < 6) {
-        return res.status(400).json({ message: "Password must be at least 6 characters" });
+    if (password.length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters" });
     }
 
     try {
@@ -28,7 +42,7 @@ exports.signup = async (req, res) => {
         const user = await User.create({ email, password, name });
 
         const token = generateToken(user);
-        res.status(201).json({ token, user: { id: user._id, email: user.email, name: user.name } });
+        res.status(201).json({ token, user: buildAuthUser(user) });
     } catch (err) {
         console.error("Signup error:", err);
         res.status(500).json({ message: "Internal server error" });
@@ -55,7 +69,7 @@ exports.login = async (req, res) => {
         }
 
         const token = generateToken(user);
-        res.json({ token, user: { id: user._id, email: user.email, name: user.name } });
+        res.json({ token, user: buildAuthUser(user) });
     } catch (err) {
         console.error("Login error:", err);
         res.status(500).json({ message: "Internal server error" });
@@ -91,7 +105,7 @@ exports.logout = async (req, res) => {
 
 // @desc    Get the current logged-in user
 exports.getMe = async (req, res) => {
-    res.json(req.user);
+    res.json(buildAuthUser(req.user));
 };
 
 // @desc    Update the logged-in user's profile
@@ -109,12 +123,7 @@ exports.updateMe = async (req, res) => {
 
         const updatedUser = await user.save();
 
-        res.json({
-            id: updatedUser._id,
-            name: updatedUser.name,
-            email: updatedUser.email,
-            avatar: updatedUser.avatar,
-        });
+        res.json(buildAuthUser(updatedUser));
 
     } catch (error) {
         console.error("Update profile error:", error);
@@ -129,8 +138,8 @@ exports.changePassword = async (req, res) => {
     if (!currentPassword || !newPassword) {
         return res.status(400).json({ message: 'Please provide both current and new passwords.' });
     }
-    if (newPassword.length < 6) {
-        return res.status(400).json({ message: 'New password must be at least 6 characters.' });
+    if (newPassword.length < 8) {
+        return res.status(400).json({ message: 'New password must be at least 8 characters.' });
     }
 
     try {

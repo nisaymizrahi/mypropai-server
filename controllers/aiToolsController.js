@@ -1,9 +1,14 @@
 const OpenAI = require('openai');
 
-// Initialize the OpenAI client with your API key
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const getOpenAIClient = () => {
+  if (!process.env.OPENAI_API_KEY) {
+    return null;
+  }
+
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+};
 
 // @desc    Generate a property listing description using AI
 exports.generateDescription = async (req, res) => {
@@ -30,6 +35,11 @@ exports.generateDescription = async (req, res) => {
   `;
 
   try {
+    const openai = getOpenAIClient();
+    if (!openai) {
+      return res.status(503).json({ msg: 'OpenAI is not configured on the server.' });
+    }
+
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini', // A powerful and cost-effective model
       messages: [

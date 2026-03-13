@@ -5,6 +5,7 @@ const {
   getLeadPropertyPreview,
   numberOrNull,
 } = require('../utils/leadPropertyService');
+const { consumeMatchingPurchase, getFeatureAccessState } = require('../utils/billingAccess');
 
 const getOpenAIClient = () => {
   if (!process.env.OPENAI_API_KEY) {
@@ -31,6 +32,17 @@ const allowedLeadFields = [
   'lotSize',
   'yearBuilt',
   'sellerAskingPrice',
+  'sellerName',
+  'sellerPhone',
+  'sellerEmail',
+  'leadSource',
+  'occupancyStatus',
+  'motivation',
+  'targetOffer',
+  'arv',
+  'rehabEstimate',
+  'nextAction',
+  'followUpDate',
   'listingStatus',
   'listedDate',
   'daysOnMarket',
@@ -49,11 +61,14 @@ const numericLeadFields = new Set([
   'lotSize',
   'yearBuilt',
   'sellerAskingPrice',
+  'targetOffer',
+  'arv',
+  'rehabEstimate',
   'daysOnMarket',
   'lastSalePrice',
 ]);
 
-const dateLeadFields = new Set(['listedDate', 'lastSaleDate']);
+const dateLeadFields = new Set(['listedDate', 'lastSaleDate', 'followUpDate']);
 
 const average = (values) => {
   if (!values.length) return null;
@@ -134,6 +149,17 @@ const buildPublicLeadSnapshot = (lead) => ({
   lotSize: lead.lotSize,
   yearBuilt: lead.yearBuilt,
   sellerAskingPrice: lead.sellerAskingPrice,
+  sellerName: lead.sellerName,
+  sellerPhone: lead.sellerPhone,
+  sellerEmail: lead.sellerEmail,
+  leadSource: lead.leadSource,
+  occupancyStatus: lead.occupancyStatus,
+  motivation: lead.motivation,
+  targetOffer: lead.targetOffer,
+  arv: lead.arv,
+  rehabEstimate: lead.rehabEstimate,
+  nextAction: lead.nextAction,
+  followUpDate: lead.followUpDate,
   listingStatus: lead.listingStatus,
   listedDate: lead.listedDate,
   daysOnMarket: lead.daysOnMarket,
@@ -218,6 +244,15 @@ const generateAiReport = async (subject, summary, comps, avmValue) => {
       squareFootage: subject.squareFootage,
       yearBuilt: subject.yearBuilt,
       sellerAskingPrice: subject.sellerAskingPrice,
+      sellerName: subject.sellerName,
+      leadSource: subject.leadSource,
+      occupancyStatus: subject.occupancyStatus,
+      motivation: subject.motivation,
+      targetOffer: subject.targetOffer,
+      arv: subject.arv,
+      rehabEstimate: subject.rehabEstimate,
+      nextAction: subject.nextAction,
+      followUpDate: subject.followUpDate,
       listingStatus: subject.listingStatus,
       daysOnMarket: subject.daysOnMarket,
       lastSalePrice: subject.lastSalePrice,
@@ -411,6 +446,24 @@ exports.analyzeComps = async (req, res) => {
       return res.status(401).json({ msg: 'Lead not found or user not authorized.' });
     }
 
+    const access = await getFeatureAccessState({
+      user: req.user,
+      featureKey: 'comps_report',
+      resourceId: lead._id,
+    });
+
+    if (!access.accessGranted) {
+      return res.status(402).json({
+        msg: 'AI comps analysis requires an active Pro subscription or a one-time comps report purchase for this lead.',
+        billing: {
+          featureKey: 'comps_report',
+          planKey: access.planKey,
+          hasActiveSubscription: access.hasActiveSubscription,
+          hasUnusedPurchase: access.hasUnusedPurchase,
+        },
+      });
+    }
+
     const preview = await getLeadPropertyPreview(buildPublicLeadSnapshot(lead)).catch(() => null);
     const subject = mergeLeadWithPreview(buildPublicLeadSnapshot(lead), preview || {});
 
@@ -496,6 +549,14 @@ exports.analyzeComps = async (req, res) => {
     };
 
     await lead.save();
+
+    if (!access.hasActiveSubscription && access.hasUnusedPurchase) {
+      await consumeMatchingPurchase({
+        userId: req.user.id,
+        kind: 'comps_report',
+        resourceId: lead._id,
+      });
+    }
 
     res.status(200).json({
       subject,

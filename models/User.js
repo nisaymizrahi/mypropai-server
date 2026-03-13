@@ -16,7 +16,27 @@ const userSchema = new mongoose.Schema(
     stripeOnboardingComplete: {
         type: Boolean,
         default: false
-    }
+    },
+
+    // Platform billing fields
+    stripeCustomerId: {
+      type: String,
+    },
+    stripeSubscriptionId: {
+      type: String,
+    },
+    subscriptionPlan: {
+      type: String,
+      enum: ['free', 'pro'],
+      default: 'free',
+    },
+    subscriptionStatus: {
+      type: String,
+      default: 'inactive',
+    },
+    subscriptionCurrentPeriodEnd: {
+      type: Date,
+    },
   },
   { timestamps: true }
 );

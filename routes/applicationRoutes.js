@@ -13,6 +13,10 @@ router.get('/public/:unitId', applicationController.getPublicApplicationDetails)
 // @desc    Submit a new rental application
 router.post('/submit', applicationController.submitApplication);
 
+// @route   GET /api/applications/payment-session/:sessionId
+// @desc    Confirm a completed Stripe Checkout session for an application
+router.get('/payment-session/:sessionId', applicationController.confirmPaymentSession);
+
 
 // --- Protected Routes for Managers ---
 
@@ -30,7 +34,7 @@ router.patch('/:id/status', requireAuth, applicationController.updateApplication
 
 // @route   POST /api/applications/:id/create-payment-intent
 // @desc    Create a Stripe payment intent for the application fee
-router.post('/:id/create-payment-intent', applicationController.createPaymentIntent);
+router.post('/:id/create-payment-intent', requireAuth, applicationController.createPaymentIntent);
 
 // @route   POST /api/applications/:id/initiate-screening
 // @desc    Initiates the tenant screening process

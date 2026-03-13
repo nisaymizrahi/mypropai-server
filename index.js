@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const multer = require("multer");
 const passport = require("passport");
 const session = require("express-session");
 const cookieParser = require("cookie-parser");
@@ -25,6 +26,7 @@ require('./models/Inspection');
 require('./models/Lead');
 require('./models/Bid');
 require('./models/Application');
+require('./models/Purchase');
 // --- End of Model Registration ---
 
 // --- Route Imports ---
@@ -50,14 +52,19 @@ const leadRoutes = require("./routes/leadRoutes");
 const stripeRoutes = require("./routes/stripeRoutes");
 const bidRoutes = require("./routes/bidRoutes");
 const notificationRoutes = require("./routes/notifications");
+const billingRoutes = require("./routes/billingRoutes");
 // 1. IMPORT THE NEW APPLICATION ROUTES
 const applicationRoutes = require("./routes/applicationRoutes");
+const billingController = require("./controllers/billingController");
+const stripeController = require("./controllers/stripeController");
 const requireAuth = require("./middleware/requireAuth");
 
 require("./config/passport");
 
 const app = express();
 connectDB();
+app.set("trust proxy", 1);
+app.disable("x-powered-by");
 
 // CORS Configuration
 const allowedOrigins = ["https://mypropai.onrender.com"];
@@ -80,7 +87,32 @@ app.use(
   })
 );
 
-app.use(express.json());
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+  }
+
+  next();
+});
+
+app.post(
+  "/api/billing/webhook",
+  express.raw({ type: "application/json" }),
+  billingController.handleStripeWebhook
+);
+
+app.post(
+  "/api/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  stripeController.handleWebhook
+);
+
+app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 
 app.use(
@@ -88,6 +120,11 @@ app.use(
     secret: process.env.JWT_SECRET,
     resave: false,
     saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    },
   })
 );
 
@@ -115,11 +152,27 @@ app.use("/api/inspections", requireAuth, inspectionRoutes);
 app.use("/api/ai-tools", requireAuth, aiToolsRoutes);
 app.use("/api/leads", requireAuth, leadRoutes);
 app.use("/api/stripe", requireAuth, stripeRoutes);
+app.use("/api/billing", requireAuth, billingRoutes);
 app.use("/api/bids", requireAuth, bidRoutes);
 app.use("/api/notifications", notificationRoutes);
 // 2. USE THE NEW APPLICATION ROUTES
 app.use("/api/applications", applicationRoutes); // Note: Auth is handled inside the routes file
 
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({ msg: "Uploaded file is too large." });
+    }
+
+    return res.status(400).json({ msg: err.message });
+  }
+
+  if (err && err.message === "Unsupported file type.") {
+    return res.status(400).json({ msg: err.message });
+  }
+
+  return next(err);
+});
 
 // Start server
 const PORT = process.env.PORT || 5001;

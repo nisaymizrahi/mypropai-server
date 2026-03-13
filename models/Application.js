@@ -55,8 +55,14 @@ const ApplicationSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  feePaidAt: {
+    type: Date,
+  },
   // Store the ID of the Stripe payment intent for reference
   stripePaymentIntentId: {
+    type: String,
+  },
+  stripeCheckoutSessionId: {
     type: String,
   },
   // Placeholder for the screening report ID from our partner service

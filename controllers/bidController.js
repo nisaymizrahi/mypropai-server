@@ -3,11 +3,22 @@ const Lead = require('../models/Lead');
 const OpenAI = require('openai');
 const axios = require('axios');
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const getOpenAIClient = () => {
+    if (!process.env.OPENAI_API_KEY) {
+        return null;
+    }
+
+    return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+};
 
 // @desc    Upload an estimate, parse it with AI, and create a new bid
 exports.importBid = async (req, res) => {
     try {
+        const openai = getOpenAIClient();
+        if (!openai) {
+            return res.status(503).json({ msg: 'OpenAI is not configured on the server.' });
+        }
+
         const { leadId } = req.body;
         if (!req.file) {
             return res.status(400).json({ msg: 'Estimate file is required.' });

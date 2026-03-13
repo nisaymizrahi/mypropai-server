@@ -1,20 +1,20 @@
 const TenantUser = require('../models/TenantUser');
-const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const { hashToken } = require('../utils/tokenSecurity');
 
 // @desc    Allow a tenant to set their password using an invitation token
 exports.setTenantPassword = async (req, res) => {
     const { token } = req.params;
     const { password } = req.body;
 
-    if (!password || password.length < 6) {
-        return res.status(400).json({ msg: 'Password must be at least 6 characters long.' });
+    if (!password || password.length < 8) {
+        return res.status(400).json({ msg: 'Password must be at least 8 characters long.' });
     }
 
     try {
         // Find the user by the invitation token and ensure it has not expired
         const tenantUser = await TenantUser.findOne({
-            invitationToken: token,
+            invitationToken: hashToken(token),
             invitationExpires: { $gt: Date.now() },
         });
 

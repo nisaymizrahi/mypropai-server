@@ -2,14 +2,14 @@ const express = require('express');
 const router = express.Router();
 const bidController = require('../controllers/bidController');
 const requireAuth = require('../middleware/requireAuth');
-const { uploadToMemory } = require('../middleware/upload');
+const { uploadBidEstimate } = require('../middleware/upload');
 
 // All routes in this file are protected
 router.use(requireAuth);
 
 // @route   POST /api/bids/import
 // @desc    Upload a contractor estimate, parse it with AI, and create a new bid
-router.post('/import', uploadToMemory.single('estimate'), bidController.importBid);
+router.post('/import', uploadBidEstimate.single('estimate'), bidController.importBid);
 
 // @route   GET /api/bids/lead/:leadId
 // @desc    Get all bids for a specific lead

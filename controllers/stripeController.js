@@ -1,9 +1,15 @@
 const User = require('../models/User');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const { getStripeClient } = require('../lib/stripe');
+const { markApplicationPaidFromSession } = require('./applicationController');
 
 // @desc    Creates a new Stripe Express account for a user and returns an onboarding link
 exports.createConnectAccount = async (req, res) => {
     try {
+        const stripe = getStripeClient();
+        if (!stripe) {
+            return res.status(503).json({ msg: 'Stripe is not configured on the server.' });
+        }
+
         const user = await User.findById(req.user.id);
         if (!user) {
             return res.status(404).json({ msg: 'User not found.' });
@@ -39,6 +45,11 @@ exports.createConnectAccount = async (req, res) => {
 // @desc    Handles the successful redirect from Stripe after user onboarding
 exports.handleStripeRedirect = async (req, res) => {
     try {
+        const stripe = getStripeClient();
+        if (!stripe) {
+            return res.status(503).json({ msg: 'Stripe is not configured on the server.' });
+        }
+
         const user = await User.findById(req.user.id);
         if (!user || !user.stripeAccountId) {
             return res.status(401).json({ msg: 'User or Stripe account not found.' });
@@ -47,10 +58,8 @@ exports.handleStripeRedirect = async (req, res) => {
         // Retrieve the account details from Stripe to verify onboarding is complete
         const account = await stripe.accounts.retrieve(user.stripeAccountId);
         
-        if (account.details_submitted) {
-            user.stripeOnboardingComplete = true;
-            await user.save();
-        }
+        user.stripeOnboardingComplete = Boolean(account.charges_enabled && account.payouts_enabled);
+        await user.save();
         
         // Redirect the user back to their account page in the frontend
         res.redirect(`${process.env.FRONTEND_URL}/account`);
@@ -58,5 +67,49 @@ exports.handleStripeRedirect = async (req, res) => {
     } catch (error) {
         console.error('Stripe redirect handling failed:', error);
         res.status(500).json({ msg: 'Server error during Stripe redirect handling.' });
+    }
+};
+
+// @desc    Handle Stripe webhooks for checkout completion
+exports.handleWebhook = async (req, res) => {
+    const stripe = getStripeClient();
+    if (!stripe) {
+        return res.status(503).json({ msg: 'Stripe is not configured on the server.' });
+    }
+
+    if (!process.env.STRIPE_WEBHOOK_SECRET) {
+        return res.status(503).json({ msg: 'Stripe webhook secret is not configured.' });
+    }
+
+    const signature = req.headers['stripe-signature'];
+    if (!signature) {
+        return res.status(400).json({ msg: 'Missing Stripe signature header.' });
+    }
+
+    let event;
+
+    try {
+        event = stripe.webhooks.constructEvent(
+            req.body,
+            signature,
+            process.env.STRIPE_WEBHOOK_SECRET
+        );
+    } catch (error) {
+        console.error('Stripe webhook signature verification failed:', error.message);
+        return res.status(400).send(`Webhook Error: ${error.message}`);
+    }
+
+    try {
+        if (event.type === 'checkout.session.completed') {
+            const session = event.data.object;
+            if (session.payment_status === 'paid') {
+                await markApplicationPaidFromSession(session);
+            }
+        }
+
+        return res.json({ received: true });
+    } catch (error) {
+        console.error('Stripe webhook handling failed:', error);
+        return res.status(500).json({ msg: 'Webhook processing failed.' });
     }
 };

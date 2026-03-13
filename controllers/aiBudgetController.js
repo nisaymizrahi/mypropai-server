@@ -1,11 +1,22 @@
 const OpenAI = require("openai");
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const getOpenAIClient = () => {
+  if (!process.env.OPENAI_API_KEY) {
+    return null;
+  }
+
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+};
 
 exports.generateBudgetLines = async (req, res) => {
   try {
+    const openai = getOpenAIClient();
+    if (!openai) {
+      return res.status(503).json({ error: "OpenAI is not configured on the server" });
+    }
+
     const { description, sqft, beds, baths, yearBuilt } = req.body;
 
     const prompt = `

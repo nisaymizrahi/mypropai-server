@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { PROPERTY_STRATEGIES } = require("../utils/propertyStrategy");
 
 const investmentSchema = new mongoose.Schema(
   {
@@ -6,7 +7,9 @@ const investmentSchema = new mongoose.Schema(
 
     // Core Info
     address: { type: String, required: true },
-    type: { type: String, enum: ["flip"], default: "flip" }, // Fix & Flip only
+    // `type` is kept as a legacy alias while the product moves to `strategy`.
+    type: { type: String, enum: PROPERTY_STRATEGIES, default: "flip" },
+    strategy: { type: String, enum: PROPERTY_STRATEGIES, default: "flip" },
     status: {
       type: String,
       enum: ["Not Started", "In Progress", "Completed", "Sold", "Archived"],

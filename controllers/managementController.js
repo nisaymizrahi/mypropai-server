@@ -4,9 +4,15 @@ const Unit = require('../models/Unit');
 const Tenant = require('../models/Tenant');
 const Lease = require('../models/Lease');
 const TenantUser = require('../models/TenantUser');
-const crypto = require('crypto');
 const cloudinary = require('cloudinary').v2;
 const sendEmail = require('../utils/sendEmail');
+const { generateHashedToken } = require('../utils/tokenSecurity');
+const {
+  MANAGEMENT_ELIGIBLE_STRATEGIES,
+  getPropertyStrategyLabel,
+  isManagementEligibleStrategy,
+  normalizePropertyStrategy,
+} = require('../utils/propertyStrategy');
 
 // @desc    Promote an Investment to a ManagedProperty
 exports.promoteInvestment = async (req, res) => {
@@ -14,7 +20,14 @@ exports.promoteInvestment = async (req, res) => {
     const investment = await Investment.findById(req.params.investmentId);
     if (!investment) return res.status(404).json({ msg: 'Investment not found' });
     if (investment.user.toString() !== req.user.id) return res.status(401).json({ msg: 'User not authorized' });
-    if (investment.type !== 'rent') return res.status(400).json({ msg: 'Only "Fix and Rent" properties can be managed.' });
+
+    const strategy = normalizePropertyStrategy(investment.strategy || investment.type);
+    if (!isManagementEligibleStrategy(strategy)) {
+      return res.status(400).json({
+        msg: `${getPropertyStrategyLabel(strategy)} properties cannot be started in management. Use Fix & Rent or Rental.`,
+      });
+    }
+
     if (investment.managedProperty) return res.status(400).json({ msg: 'This property is already being managed.' });
 
     const managedProperty = new ManagedProperty({
@@ -56,8 +69,29 @@ exports.getManagedProperties = async (req, res) => {
 // @desc    Get "Fix and Rent" investments that are not yet managed
 exports.getUnmanagedProperties = async (req, res) => {
   try {
-    const unmanaged = await Investment.find({ user: req.user.id, type: 'rent', managedProperty: null }).select('address');
-    res.json(unmanaged);
+    const unmanaged = await Investment.find({
+      user: req.user.id,
+      managedProperty: null,
+      $or: [
+        { strategy: { $in: MANAGEMENT_ELIGIBLE_STRATEGIES } },
+        { type: { $in: [...MANAGEMENT_ELIGIBLE_STRATEGIES, 'rent'] } },
+      ],
+    }).select('address propertyType unitCount strategy type');
+
+    res.json(
+      unmanaged.map((property) => {
+        const strategy = normalizePropertyStrategy(property.strategy || property.type);
+
+        return {
+          _id: property._id,
+          address: property.address,
+          propertyType: property.propertyType || '',
+          strategy,
+          strategyLabel: getPropertyStrategyLabel(strategy),
+          unitCount: property.unitCount || 0,
+        };
+      })
+    );
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');
@@ -147,8 +181,8 @@ exports.addLeaseToUnit = async (req, res) => {
     
     try {
         const tenantUser = new TenantUser({ email, tenantInfo: newTenant._id });
-        const invitationToken = crypto.randomBytes(32).toString('hex');
-        tenantUser.invitationToken = invitationToken;
+        const { tokenHash } = generateHashedToken();
+        tenantUser.invitationToken = tokenHash;
         tenantUser.invitationExpires = Date.now() + 48 * 60 * 60 * 1000;
         await tenantUser.save({ validateBeforeSave: false });
     } catch(err) {
@@ -370,8 +404,8 @@ exports.sendTenantInvite = async (req, res) => {
             });
         }
 
-        const invitationToken = crypto.randomBytes(32).toString('hex');
-        tenantUser.invitationToken = invitationToken;
+        const { token: invitationToken, tokenHash } = generateHashedToken();
+        tenantUser.invitationToken = tokenHash;
         tenantUser.invitationExpires = Date.now() + 48 * 60 * 60 * 1000;
         await tenantUser.save();
 
