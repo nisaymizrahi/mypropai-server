@@ -33,6 +33,7 @@ const LeadSchema = new mongoose.Schema({
   squareFootage: { type: Number },
   lotSize: { type: Number },
   yearBuilt: { type: Number },
+  unitCount: { type: Number },
   sellerAskingPrice: { type: Number },
   sellerName: { type: String, trim: true },
   sellerPhone: { type: String, trim: true },
@@ -67,6 +68,16 @@ const LeadSchema = new mongoose.Schema({
   notes: {
     type: String,
     trim: true,
+  },
+  renovationPlan: {
+    verifiedSquareFootage: { type: Number },
+    renovationLevel: { type: String, trim: true },
+    extensionPlanned: { type: Boolean, default: false },
+    extensionSquareFootage: { type: Number },
+    selectedScopes: [{ type: String, trim: true }],
+    layoutChanges: { type: String, trim: true },
+    contractorNotes: { type: String, trim: true },
+    additionalNotes: { type: String, trim: true },
   },
   compsAnalysis: {
     generatedAt: { type: Date },

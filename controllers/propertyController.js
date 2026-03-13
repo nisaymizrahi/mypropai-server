@@ -101,6 +101,7 @@ const buildLeadPayload = (userId, property, input = {}) => {
     squareFootage: property.squareFootage,
     lotSize: property.lotSize,
     yearBuilt: property.yearBuilt,
+    unitCount: property.unitCount,
     sellerName: optionalString(input.sellerName),
     sellerPhone: optionalString(input.sellerPhone),
     sellerEmail: optionalString(input.sellerEmail),

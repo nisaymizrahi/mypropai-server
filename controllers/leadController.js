@@ -32,6 +32,7 @@ const sharedLeadFields = [
   'squareFootage',
   'lotSize',
   'yearBuilt',
+  'unitCount',
 ];
 
 const stageLeadFields = [
@@ -54,6 +55,7 @@ const stageLeadFields = [
   'lastSaleDate',
   'notes',
   'status',
+  'renovationPlan',
 ];
 
 const numericLeadFields = new Set([
@@ -64,6 +66,7 @@ const numericLeadFields = new Set([
   'squareFootage',
   'lotSize',
   'yearBuilt',
+  'unitCount',
   'sellerAskingPrice',
   'targetOffer',
   'arv',
@@ -73,6 +76,39 @@ const numericLeadFields = new Set([
 ]);
 
 const dateLeadFields = new Set(['listedDate', 'lastSaleDate', 'followUpDate']);
+
+const booleanFromInput = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', 'yes', '1'].includes(normalized)) return true;
+    if (['false', 'no', '0'].includes(normalized)) return false;
+  }
+  return Boolean(value);
+};
+
+const sanitizeRenovationPlan = (input = {}) => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+
+  const selectedScopes = Array.isArray(input.selectedScopes)
+    ? [...new Set(input.selectedScopes.map((scope) => String(scope).trim()).filter(Boolean))]
+    : [];
+
+  return {
+    verifiedSquareFootage: numberOrNull(input.verifiedSquareFootage),
+    renovationLevel:
+      typeof input.renovationLevel === 'string' ? input.renovationLevel.trim() : '',
+    extensionPlanned: booleanFromInput(input.extensionPlanned) || false,
+    extensionSquareFootage: numberOrNull(input.extensionSquareFootage),
+    selectedScopes,
+    layoutChanges: typeof input.layoutChanges === 'string' ? input.layoutChanges.trim() : '',
+    contractorNotes: typeof input.contractorNotes === 'string' ? input.contractorNotes.trim() : '',
+    additionalNotes: typeof input.additionalNotes === 'string' ? input.additionalNotes.trim() : '',
+  };
+};
 
 const average = (values) => {
   if (!values.length) return null;
@@ -103,6 +139,11 @@ const buildLeadUpdates = (input = {}, { includeSharedFields = true } = {}) => {
     if (!Object.prototype.hasOwnProperty.call(input, field)) return;
 
     const value = input[field];
+
+    if (field === 'renovationPlan') {
+      updates[field] = sanitizeRenovationPlan(value);
+      return;
+    }
 
     if (numericLeadFields.has(field)) {
       updates[field] = numberOrNull(value);
@@ -155,6 +196,7 @@ const buildPublicLeadSnapshot = (lead) => ({
   squareFootage: lead.squareFootage,
   lotSize: lead.lotSize,
   yearBuilt: lead.yearBuilt,
+  unitCount: lead.unitCount,
   sellerAskingPrice: lead.sellerAskingPrice,
   sellerName: lead.sellerName,
   sellerPhone: lead.sellerPhone,
@@ -174,6 +216,7 @@ const buildPublicLeadSnapshot = (lead) => ({
   lastSaleDate: lead.lastSaleDate,
   notes: lead.notes,
   status: lead.status,
+  renovationPlan: lead.renovationPlan,
 });
 
 const scoreComparable = (subject, comp) => {
@@ -418,7 +461,7 @@ exports.updateLead = async (req, res) => {
       return res.status(401).json({ msg: 'Lead not found or user not authorized.' });
     }
 
-    const updates = buildLeadUpdates(req.body, { includeSharedFields: false });
+    const updates = buildLeadUpdates(req.body, { includeSharedFields: true });
     let mergedUpdates = { ...updates };
 
     if (updates.address && updates.address !== lead.address) {
