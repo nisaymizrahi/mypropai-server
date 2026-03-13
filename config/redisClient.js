@@ -1,18 +1,33 @@
 const redis = require('redis');
 
 let redisClient;
+const shouldSkipRedisConnection = process.env.SKIP_REDIS_CONNECT === '1';
 
-if (!process.env.REDIS_URL) {
+const createNoopRedisClient = () => ({
+  isReady: false,
+  isOpen: false,
+  async get() {
+    return null;
+  },
+  async set() {
+    return null;
+  },
+  async quit() {
+    return null;
+  },
+  disconnect() {
+    return null;
+  },
+  destroy() {
+    return null;
+  },
+});
+
+if (shouldSkipRedisConnection) {
+  redisClient = createNoopRedisClient();
+} else if (!process.env.REDIS_URL) {
   console.warn('REDIS_URL is not configured. Continuing without Redis token blocklisting.');
-  redisClient = {
-    isReady: false,
-    async get() {
-      return null;
-    },
-    async set() {
-      return null;
-    },
-  };
+  redisClient = createNoopRedisClient();
 } else {
   // Create the Redis client
   redisClient = redis.createClient({

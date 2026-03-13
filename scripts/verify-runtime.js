@@ -1,6 +1,7 @@
 const path = require('path');
 
 const projectRoot = path.resolve(__dirname, '..');
+process.env.SKIP_REDIS_CONNECT = '1';
 
 const modelModules = [
   './models/User',
