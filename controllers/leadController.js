@@ -88,14 +88,96 @@ const booleanFromInput = (value) => {
   return Boolean(value);
 };
 
+const buildRenovationItemId = (index = 0) =>
+  `ren-${Date.now().toString(36)}-${index.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const titleCaseFromSlug = (value = '') =>
+  String(value)
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ');
+
+const sanitizeRenovationItems = (input = []) => {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .map((item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return null;
+      }
+
+      const category = typeof item.category === 'string' ? item.category.trim() : '';
+      const name =
+        typeof item.name === 'string' && item.name.trim()
+          ? item.name.trim()
+          : titleCaseFromSlug(category) || 'Custom item';
+      const scopeDescription =
+        typeof item.scopeDescription === 'string' ? item.scopeDescription.trim() : '';
+
+      if (!name && !scopeDescription && numberOrNull(item.budget) === null) {
+        return null;
+      }
+
+      return {
+        itemId:
+          typeof item.itemId === 'string' && item.itemId.trim()
+            ? item.itemId.trim()
+            : buildRenovationItemId(index),
+        name,
+        category: category || 'custom',
+        budget: numberOrNull(item.budget),
+        status:
+          typeof item.status === 'string' && item.status.trim()
+            ? item.status.trim()
+            : 'planning',
+        scopeDescription,
+      };
+    })
+    .filter(Boolean);
+};
+
 const sanitizeRenovationPlan = (input = {}) => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return null;
   }
 
+  const items = sanitizeRenovationItems(input.items);
   const selectedScopes = Array.isArray(input.selectedScopes)
     ? [...new Set(input.selectedScopes.map((scope) => String(scope).trim()).filter(Boolean))]
     : [];
+
+  const legacyItems = items.length
+    ? items
+    : selectedScopes.map((scope, index) => ({
+        itemId: buildRenovationItemId(index),
+        name: titleCaseFromSlug(scope),
+        category: String(scope).trim() || 'custom',
+        budget: null,
+        status: 'planning',
+        scopeDescription: '',
+      }));
+
+  const legacyNotes = [
+    typeof input.layoutChanges === 'string' ? input.layoutChanges.trim() : '',
+    typeof input.contractorNotes === 'string' ? input.contractorNotes.trim() : '',
+    typeof input.additionalNotes === 'string' ? input.additionalNotes.trim() : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  if (!legacyItems.length && legacyNotes) {
+    legacyItems.push({
+      itemId: buildRenovationItemId(legacyItems.length),
+      name: 'General renovation notes',
+      category: 'custom',
+      budget: null,
+      status: 'planning',
+      scopeDescription: legacyNotes,
+    });
+  }
 
   return {
     verifiedSquareFootage: numberOrNull(input.verifiedSquareFootage),
@@ -103,10 +185,7 @@ const sanitizeRenovationPlan = (input = {}) => {
       typeof input.renovationLevel === 'string' ? input.renovationLevel.trim() : '',
     extensionPlanned: booleanFromInput(input.extensionPlanned) || false,
     extensionSquareFootage: numberOrNull(input.extensionSquareFootage),
-    selectedScopes,
-    layoutChanges: typeof input.layoutChanges === 'string' ? input.layoutChanges.trim() : '',
-    contractorNotes: typeof input.contractorNotes === 'string' ? input.contractorNotes.trim() : '',
-    additionalNotes: typeof input.additionalNotes === 'string' ? input.additionalNotes.trim() : '',
+    items: legacyItems,
   };
 };
 
