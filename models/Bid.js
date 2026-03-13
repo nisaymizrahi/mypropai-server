@@ -17,6 +17,32 @@ const BidItemSchema = new mongoose.Schema({
   },
 });
 
+const BidRenovationAssignmentSchema = new mongoose.Schema({
+  renovationItemId: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  renovationItemName: {
+    type: String,
+    trim: true,
+  },
+  amount: {
+    type: Number,
+  },
+  scopeSummary: {
+    type: String,
+    trim: true,
+  },
+  confidence: {
+    type: Number,
+  },
+  matchedLineItems: [{
+    type: String,
+    trim: true,
+  }],
+}, { _id: false });
+
 // This is the main schema for a single, complete bid from a contractor
 const BidSchema = new mongoose.Schema({
   // Link to the user who owns this bid
@@ -45,9 +71,17 @@ const BidSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+  sourceFileName: {
+    type: String,
+    trim: true,
+  },
+  sourceDocumentUrl: {
+    type: String,
+    trim: true,
+  },
   // The array of all line items parsed from the estimate
   items: [BidItemSchema],
-  
+  renovationAssignments: [BidRenovationAssignmentSchema],
 }, { timestamps: true });
 
 module.exports = mongoose.model('Bid', BidSchema);
