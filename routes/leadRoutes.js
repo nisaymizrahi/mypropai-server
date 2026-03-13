@@ -9,6 +9,10 @@ router.use(requireAuth);
 // ✅ NEW: Route to get summary data for the leads dashboard
 router.get('/summary', leadController.getLeadSummary);
 
+// @route   POST /api/leads/preview-property
+// @desc    Preview property details before creating a lead
+router.post('/preview-property', leadController.previewLeadProperty);
+
 // @route   POST /api/leads
 // @desc    Create a new lead
 router.post('/', leadController.createLead);
