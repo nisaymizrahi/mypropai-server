@@ -53,6 +53,7 @@ const stripeRoutes = require("./routes/stripeRoutes");
 const bidRoutes = require("./routes/bidRoutes");
 const notificationRoutes = require("./routes/notifications");
 const billingRoutes = require("./routes/billingRoutes");
+const propertyRoutes = require("./routes/properties");
 // 1. IMPORT THE NEW APPLICATION ROUTES
 const applicationRoutes = require("./routes/applicationRoutes");
 const billingController = require("./controllers/billingController");
@@ -67,15 +68,26 @@ app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
 // CORS Configuration
-const allowedOrigins = ["https://mypropai.onrender.com"];
+const normalizeOrigin = (value) => value?.trim().replace(/\/+$/, "");
+
+const allowedOrigins = new Set(["https://mypropai.onrender.com"]);
+
+[process.env.FRONTEND_URL, process.env.FRONTEND_URLS]
+  .filter(Boolean)
+  .flatMap((value) => value.split(","))
+  .map(normalizeOrigin)
+  .filter(Boolean)
+  .forEach((origin) => allowedOrigins.add(origin));
+
 if (process.env.NODE_ENV !== 'production') {
-  allowedOrigins.push('http://localhost:3000');
+  allowedOrigins.add('http://localhost:3000');
 }
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      const normalizedOrigin = normalizeOrigin(origin);
+      if (!origin || allowedOrigins.has(normalizedOrigin)) {
         callback(null, true);
       } else {
         callback(new Error('The CORS policy for this site does not allow access from the specified Origin.'));
@@ -155,6 +167,7 @@ app.use("/api/stripe", requireAuth, stripeRoutes);
 app.use("/api/billing", requireAuth, billingRoutes);
 app.use("/api/bids", requireAuth, bidRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/properties", requireAuth, propertyRoutes);
 // 2. USE THE NEW APPLICATION ROUTES
 app.use("/api/applications", applicationRoutes); // Note: Auth is handled inside the routes file
 
