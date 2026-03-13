@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "postinstall": "node scripts/verify-runtime.js",
     "start": "node index.js"
   },
   "dependencies": {
