@@ -11,13 +11,26 @@ const ApplicationSchema = new mongoose.Schema({
   property: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'ManagedProperty',
-    required: true,
+    default: null,
   },
   // The specific unit this application is for
   unit: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Unit',
-    required: true,
+    default: null,
+  },
+  applicationScope: {
+    type: String,
+    enum: ['portfolio', 'property', 'unit'],
+    default: 'portfolio',
+  },
+  propertyAddressSnapshot: {
+    type: String,
+    default: '',
+  },
+  unitNameSnapshot: {
+    type: String,
+    default: '',
   },
   // Applicant's personal information
   applicantInfo: {

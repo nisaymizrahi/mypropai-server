@@ -5,8 +5,12 @@ const requireAuth = require('../middleware/requireAuth');
 
 // --- Public Routes for Applicants ---
 
+// @route   GET /api/applications/public
+// @desc    Get public details for an invite-based application form
+router.get('/public', applicationController.getPublicApplicationDetails);
+
 // @route   GET /api/applications/public/:unitId
-// @desc    Get public details for an application form (e.g., property address)
+// @desc    Get public details for a legacy unit-based application form
 router.get('/public/:unitId', applicationController.getPublicApplicationDetails);
 
 // @route   POST /api/applications/submit
@@ -19,6 +23,14 @@ router.get('/payment-session/:sessionId', applicationController.confirmPaymentSe
 
 
 // --- Protected Routes for Managers ---
+
+// @route   GET /api/applications
+// @desc    Get all applications for the authenticated manager, optionally filtered by property
+router.get('/', requireAuth, applicationController.getApplications);
+
+// @route   POST /api/applications/invitations
+// @desc    Generate a public application link or email it to a prospect
+router.post('/invitations', requireAuth, applicationController.createApplicationInvite);
 
 // @route   GET /api/applications/property/:propertyId
 // @desc    Get all applications for a specific property

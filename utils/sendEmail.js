@@ -13,7 +13,7 @@ const sendEmail = async (options) => {
 
   // 2. Define the email options
   const mailOptions = {
-    from: `MyPropAI <${process.env.EMAIL_FROM}>`,
+    from: `Fliprop <${process.env.EMAIL_FROM}>`,
     to: options.to,
     subject: options.subject,
     html: options.html,
@@ -25,7 +25,7 @@ const sendEmail = async (options) => {
     console.log('Email sent successfully');
   } catch (error) {
     console.error('Error sending email:', error);
-    // In a real app, you might want more robust error handling here
+    throw error;
   }
 };
 
