@@ -27,6 +27,7 @@ const sharedNumericFields = new Set([
   'unitCount',
   'latitude',
   'longitude',
+  'sellerAskingPrice',
 ]);
 
 const sharedStringFields = new Set([
@@ -38,6 +39,7 @@ const sharedStringFields = new Set([
   'zipCode',
   'county',
   'propertyType',
+  'listingStatus',
 ]);
 
 const leadNumericFields = [

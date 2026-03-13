@@ -28,6 +28,8 @@ const PropertySchema = new mongoose.Schema(
     lotSize: { type: Number },
     yearBuilt: { type: Number },
     unitCount: { type: Number },
+    listingStatus: { type: String, trim: true },
+    sellerAskingPrice: { type: Number },
   },
   { timestamps: true }
 );

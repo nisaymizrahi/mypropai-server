@@ -73,6 +73,8 @@ const buildPropertyPayload = (source = {}) => {
     lotSize: normalizeNumber(source.lotSize),
     yearBuilt: normalizeNumber(source.yearBuilt),
     unitCount: normalizeNumber(unitCount),
+    listingStatus: normalizeString(source.listingStatus),
+    sellerAskingPrice: normalizeNumber(source.sellerAskingPrice),
   };
 };
 

@@ -110,6 +110,8 @@ const readPropertyProfile = (property) => ({
   lotSize: normalizeNumber(property?.lotSize),
   yearBuilt: normalizeNumber(property?.yearBuilt),
   unitCount: normalizeNumber(property?.unitCount),
+  listingStatus: property?.listingStatus || '',
+  sellerAskingPrice: normalizeNumber(property?.sellerAskingPrice),
 });
 
 const readLeadProfile = (lead) => ({
@@ -128,6 +130,8 @@ const readLeadProfile = (lead) => ({
   squareFootage: normalizeNumber(lead?.squareFootage),
   lotSize: normalizeNumber(lead?.lotSize),
   yearBuilt: normalizeNumber(lead?.yearBuilt),
+  listingStatus: lead?.listingStatus || '',
+  sellerAskingPrice: normalizeNumber(lead?.sellerAskingPrice),
 });
 
 const readInvestmentProfile = (investment) => ({
@@ -173,6 +177,12 @@ const buildSharedProfile = (group) => {
     lotSize: pickFirst(propertyProfile.lotSize, investmentProfile.lotSize, leadProfile.lotSize, null),
     yearBuilt: pickFirst(propertyProfile.yearBuilt, investmentProfile.yearBuilt, leadProfile.yearBuilt, null),
     unitCount: pickFirst(propertyProfile.unitCount, investmentProfile.unitCount, managedProfile.unitCount, null),
+    listingStatus: pickFirst(propertyProfile.listingStatus, leadProfile.listingStatus, ''),
+    sellerAskingPrice: pickFirst(
+      propertyProfile.sellerAskingPrice,
+      leadProfile.sellerAskingPrice,
+      null
+    ),
   };
 };
 
