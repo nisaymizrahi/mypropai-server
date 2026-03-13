@@ -1,7 +1,6 @@
 const axios = require('axios');
 
 const RENTCAST_BASE_URL = 'https://api.rentcast.io/v1';
-const ATTOM_BASE_URL = 'https://api.gateway.attomdata.com/propertyapi/v1.0.0';
 
 const numberOrNull = (value) => {
   if (value === undefined || value === null || value === '') return null;
@@ -45,17 +44,6 @@ const getRentCastHeaders = () => {
 
   return {
     'X-Api-Key': process.env.RENTCAST_API_KEY,
-    Accept: 'application/json',
-  };
-};
-
-const getAttomHeaders = () => {
-  if (!process.env.ATTOM_API_KEY) {
-    throw new Error('ATTOM_API_KEY is not configured.');
-  }
-
-  return {
-    apikey: process.env.ATTOM_API_KEY,
     Accept: 'application/json',
   };
 };
@@ -141,72 +129,8 @@ const getLeadPropertyPreview = async (input = {}) => {
   };
 };
 
-const fetchSoldComps = async ({
-  latitude,
-  longitude,
-  radiusMiles = 1,
-  saleDateMonths = 6,
-  limit = 30,
-}) => {
-  const lat = numberOrNull(latitude);
-  const lng = numberOrNull(longitude);
-
-  if (!lat || !lng) {
-    throw new Error('Latitude and longitude are required to fetch sold comps.');
-  }
-
-  const response = await axios.get(`${ATTOM_BASE_URL}/property/saleshistory`, {
-    params: {
-      latitude: lat,
-      longitude: lng,
-      radius: Math.max(numberOrNull(radiusMiles) || 1, 0.25),
-      orderBy: 'saleDate desc',
-      pageSize: Math.min(Math.max(numberOrNull(limit) || 30, 10), 40),
-    },
-    headers: getAttomHeaders(),
-  });
-
-  const cutoff = new Date();
-  cutoff.setMonth(cutoff.getMonth() - (numberOrNull(saleDateMonths) || 6));
-
-  return (response.data?.property || [])
-    .map((prop) => {
-      const salePrice = numberOrNull(prop.sale?.amount);
-      const squareFootage = numberOrNull(prop.building?.size?.bldgsize);
-      const saleDate = prop.sale?.saleDate || null;
-
-      return {
-        id: prop.identifier?.attomId || prop.identifier?.Id || `${prop.address?.line1}-${saleDate}`,
-        address: [
-          prop.address?.line1,
-          prop.address?.locality,
-          prop.address?.countrySubd,
-          prop.address?.postal1,
-        ].filter(Boolean).join(', '),
-        propertyType: prop.summary?.proptype || prop.summary?.propertyType || '',
-        bedrooms: numberOrNull(prop.building?.rooms?.beds),
-        bathrooms: numberOrNull(prop.building?.rooms?.bathsFull),
-        squareFootage,
-        lotSize: numberOrNull(prop.lot?.lotSize1),
-        yearBuilt: numberOrNull(prop.summary?.yearbuilt),
-        salePrice,
-        saleDate,
-        latitude: numberOrNull(prop.location?.latitude),
-        longitude: numberOrNull(prop.location?.longitude),
-        distance: numberOrNull(prop.location?.distance),
-        pricePerSqft: salePrice && squareFootage ? salePrice / squareFootage : null,
-      };
-    })
-    .filter((comp) => {
-      if (!comp.salePrice || !comp.saleDate) return false;
-      const soldAt = new Date(comp.saleDate);
-      return Number.isFinite(soldAt.valueOf()) && soldAt >= cutoff;
-    });
-};
-
 module.exports = {
   fetchRentCastValueEstimate,
-  fetchSoldComps,
   getLeadPropertyPreview,
   numberOrNull,
 };
