@@ -54,6 +54,7 @@ const bidRoutes = require("./routes/bidRoutes");
 const notificationRoutes = require("./routes/notifications");
 const billingRoutes = require("./routes/billingRoutes");
 const propertyRoutes = require("./routes/properties");
+const platformManagerRoutes = require("./routes/platformManagerRoutes");
 // 1. IMPORT THE NEW APPLICATION ROUTES
 const applicationRoutes = require("./routes/applicationRoutes");
 const billingController = require("./controllers/billingController");
@@ -70,7 +71,11 @@ app.disable("x-powered-by");
 // CORS Configuration
 const normalizeOrigin = (value) => value?.trim().replace(/\/+$/, "");
 
-const allowedOrigins = new Set(["https://mypropai.onrender.com"]);
+const allowedOrigins = new Set([
+  "https://mypropai.onrender.com",
+  "https://fliprop.com",
+  "https://www.fliprop.com",
+]);
 
 [process.env.FRONTEND_URL, process.env.FRONTEND_URLS]
   .filter(Boolean)
@@ -168,6 +173,7 @@ app.use("/api/billing", requireAuth, billingRoutes);
 app.use("/api/bids", requireAuth, bidRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/properties", requireAuth, propertyRoutes);
+app.use("/api/platform-manager", platformManagerRoutes);
 // 2. USE THE NEW APPLICATION ROUTES
 app.use("/api/applications", applicationRoutes); // Note: Auth is handled inside the routes file
 
