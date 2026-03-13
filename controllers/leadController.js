@@ -5,7 +5,8 @@ const {
   getLeadPropertyPreview,
   numberOrNull,
 } = require('../utils/leadPropertyService');
-const { consumeMatchingPurchase, getFeatureAccessState } = require('../utils/billingAccess');
+const { consumeMatchingPurchase, getFeatureAccessState, recordFeatureUsage } = require('../utils/billingAccess');
+const { upsertCanonicalProperty } = require('../utils/propertyRecordService');
 
 const getOpenAIClient = () => {
   if (!process.env.OPENAI_API_KEY) {
@@ -15,7 +16,7 @@ const getOpenAIClient = () => {
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 };
 
-const allowedLeadFields = [
+const sharedLeadFields = [
   'address',
   'addressLine1',
   'addressLine2',
@@ -31,6 +32,9 @@ const allowedLeadFields = [
   'squareFootage',
   'lotSize',
   'yearBuilt',
+];
+
+const stageLeadFields = [
   'sellerAskingPrice',
   'sellerName',
   'sellerPhone',
@@ -89,10 +93,13 @@ const roundCurrency = (value) => {
   return Math.round(value / 1000) * 1000;
 };
 
-const buildLeadUpdates = (input = {}) => {
+const buildLeadUpdates = (input = {}, { includeSharedFields = true } = {}) => {
   const updates = {};
+  const allowedFields = includeSharedFields
+    ? [...sharedLeadFields, ...stageLeadFields]
+    : stageLeadFields;
 
-  allowedLeadFields.forEach((field) => {
+  allowedFields.forEach((field) => {
     if (!Object.prototype.hasOwnProperty.call(input, field)) return;
 
     const value = input[field];
@@ -336,7 +343,7 @@ exports.getLeadSummary = async (req, res) => {
 // @desc    Preview property details before creating a lead
 exports.previewLeadProperty = async (req, res) => {
   try {
-    const payload = buildLeadUpdates(req.body);
+    const payload = buildLeadUpdates(req.body, { includeSharedFields: true });
 
     if (!payload.address) {
       return res.status(400).json({ msg: 'Address is required.' });
@@ -353,16 +360,23 @@ exports.previewLeadProperty = async (req, res) => {
 // @desc    Create a new lead
 exports.createLead = async (req, res) => {
   try {
-    const payload = buildLeadUpdates(req.body);
+    const payload = buildLeadUpdates(req.body, { includeSharedFields: true });
 
     if (!payload.address) {
       return res.status(400).json({ msg: 'Address is required.' });
     }
 
     const preview = await getLeadPropertyPreview(payload).catch(() => null);
+    const leadDraft = mergeLeadWithPreview(payload, preview || {});
+    const property = await upsertCanonicalProperty({
+      userId: req.user.id,
+      source: leadDraft,
+    });
+
     const newLead = new Lead({
       user: req.user.id,
-      ...mergeLeadWithPreview(payload, preview || {}),
+      property: property?._id || null,
+      ...leadDraft,
     });
 
     await newLead.save();
@@ -404,7 +418,7 @@ exports.updateLead = async (req, res) => {
       return res.status(401).json({ msg: 'Lead not found or user not authorized.' });
     }
 
-    const updates = buildLeadUpdates(req.body);
+    const updates = buildLeadUpdates(req.body, { includeSharedFields: false });
     let mergedUpdates = { ...updates };
 
     if (updates.address && updates.address !== lead.address) {
@@ -413,6 +427,14 @@ exports.updateLead = async (req, res) => {
     }
 
     Object.assign(lead, mergedUpdates);
+    const property = await upsertCanonicalProperty({
+      userId: req.user.id,
+      existingPropertyId: lead.property,
+      source: lead,
+    });
+    if (property) {
+      lead.property = property._id;
+    }
     await lead.save();
     res.json(lead);
   } catch (error) {
@@ -454,12 +476,18 @@ exports.analyzeComps = async (req, res) => {
 
     if (!access.accessGranted) {
       return res.status(402).json({
-        msg: 'AI comps analysis requires an active Pro subscription or a one-time comps report purchase for this lead.',
+        msg: access.hasActiveSubscription
+          ? 'You have used all 10 included Pro comps reports for this month. Buy this report one time to continue.'
+          : 'AI comps analysis requires Pro or a one-time comps report purchase for this lead.',
         billing: {
           featureKey: 'comps_report',
           planKey: access.planKey,
           hasActiveSubscription: access.hasActiveSubscription,
           hasUnusedPurchase: access.hasUnusedPurchase,
+          monthlyIncludedLimit: access.monthlyIncludedLimit,
+          monthlyIncludedUsedCount: access.monthlyIncludedUsedCount,
+          monthlyIncludedRemainingCount: access.monthlyIncludedRemainingCount,
+          monthlyIncludedResetsAt: access.monthlyIncludedResetsAt,
         },
       });
     }
@@ -550,7 +578,22 @@ exports.analyzeComps = async (req, res) => {
 
     await lead.save();
 
-    if (!access.hasActiveSubscription && access.hasUnusedPurchase) {
+    if (access.accessSource === 'subscription_included') {
+      await recordFeatureUsage({
+        userId: req.user.id,
+        featureKey: 'comps_report',
+        resourceType: 'lead',
+        resourceId: lead._id,
+        source: 'subscription_included',
+        metadata: {
+          maxComps: Math.min(Math.max(numberOrNull(maxComps) || 8, 5), 12),
+          radius: numberOrNull(radius) || 1,
+          saleDateMonths: numberOrNull(saleDateMonths) || 6,
+        },
+      });
+    }
+
+    if (access.accessSource === 'one_time_purchase' && access.hasUnusedPurchase) {
       await consumeMatchingPurchase({
         userId: req.user.id,
         kind: 'comps_report',

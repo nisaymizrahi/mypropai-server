@@ -2,26 +2,38 @@ const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const redisClient = require('../config/redisClient');
+const { getEffectiveSubscriptionState } = require('../utils/billingAccess');
+const { isPlatformManager } = require('../utils/platformAccess');
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 
-const buildAuthUser = (user) => ({
-  id: user._id,
-  name: user.name,
-  email: user.email,
-  avatar: user.avatar,
-  stripeAccountId: user.stripeAccountId || null,
-  stripeOnboardingComplete: Boolean(user.stripeOnboardingComplete),
-  stripeCustomerId: user.stripeCustomerId || null,
-  stripeSubscriptionId: user.stripeSubscriptionId || null,
-  subscriptionPlan: user.subscriptionPlan || 'free',
-  subscriptionStatus: user.subscriptionStatus || 'inactive',
-  subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd || null,
-});
+const buildAuthUser = (user, options = {}) => {
+  const impersonation = options.impersonation || { active: false };
+  const subscriptionState = getEffectiveSubscriptionState(user);
+
+  return {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    avatar: user.avatar,
+    accountStatus: user.accountStatus || 'active',
+    stripeAccountId: user.stripeAccountId || null,
+    stripeOnboardingComplete: Boolean(user.stripeOnboardingComplete),
+    stripeCustomerId: user.stripeCustomerId || null,
+    stripeSubscriptionId: user.stripeSubscriptionId || null,
+    subscriptionPlan: subscriptionState.planKey,
+    subscriptionStatus: subscriptionState.status,
+    subscriptionCurrentPeriodEnd: subscriptionState.renewsAt,
+    subscriptionSource: subscriptionState.source,
+    subscriptionOverride: user.platformSubscriptionOverride || 'none',
+    isPlatformManager: isPlatformManager(user) && !impersonation.active,
+    impersonation,
+  };
+};
 
 // Helper function to generate a token
-const generateToken = (user) => {
-  return jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
+const generateToken = (user, payload = {}, expiresIn = '7d') => {
+  return jwt.sign({ userId: user._id, ...payload }, JWT_SECRET, { expiresIn });
 };
 
 // @desc    Register a new user
@@ -61,6 +73,10 @@ exports.login = async (req, res) => {
         const user = await User.findOne({ email }).select('+password');
         if (!user || !user.password) {
             return res.status(401).json({ message: "Invalid credentials" });
+        }
+
+        if (user.accountStatus === 'suspended') {
+            return res.status(403).json({ message: "This account has been suspended." });
         }
 
         const match = await user.comparePassword(password);
@@ -105,7 +121,7 @@ exports.logout = async (req, res) => {
 
 // @desc    Get the current logged-in user
 exports.getMe = async (req, res) => {
-    res.json(buildAuthUser(req.user));
+    res.json(buildAuthUser(req.user, { impersonation: req.auth?.impersonation }));
 };
 
 // @desc    Update the logged-in user's profile

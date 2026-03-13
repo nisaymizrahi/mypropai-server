@@ -1,27 +1,78 @@
+const FeatureUsage = require('../models/FeatureUsage');
 const Purchase = require('../models/Purchase');
 const { FEATURE_RULES, ONE_TIME_PRODUCTS, SUBSCRIPTION_PLANS } = require('../config/billingCatalog');
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing']);
 
-const isSubscriptionActive = (user) => {
-  if (!user) return false;
+const getEffectiveSubscriptionState = (user) => {
+  const override = user?.platformSubscriptionOverride || 'none';
 
-  if (!ACTIVE_SUBSCRIPTION_STATUSES.has(user.subscriptionStatus)) {
-    return false;
+  if (override === 'pro') {
+    return {
+      planKey: 'pro',
+      status: 'active',
+      isActive: true,
+      renewsAt: null,
+      source: 'platform_override',
+      isOverride: true,
+      overridePlan: 'pro',
+    };
   }
 
-  if (user.subscriptionCurrentPeriodEnd) {
+  if (override === 'free') {
+    return {
+      planKey: 'free',
+      status: 'inactive',
+      isActive: false,
+      renewsAt: null,
+      source: 'platform_override',
+      isOverride: true,
+      overridePlan: 'free',
+    };
+  }
+
+  if (!user) {
+    return {
+      planKey: 'free',
+      status: 'inactive',
+      isActive: false,
+      renewsAt: null,
+      source: 'none',
+      isOverride: false,
+      overridePlan: 'none',
+    };
+  }
+
+  let isActive = ACTIVE_SUBSCRIPTION_STATUSES.has(user.subscriptionStatus);
+
+  if (isActive && user.subscriptionCurrentPeriodEnd) {
     const end = new Date(user.subscriptionCurrentPeriodEnd);
     if (Number.isFinite(end.valueOf()) && end < new Date()) {
-      return false;
+      isActive = false;
     }
   }
 
-  return user.subscriptionPlan === 'pro';
+  isActive = isActive && user.subscriptionPlan === 'pro';
+
+  return {
+    planKey: isActive ? 'pro' : 'free',
+    status: user.subscriptionStatus || 'inactive',
+    isActive,
+    renewsAt: user.subscriptionCurrentPeriodEnd || null,
+    source: user.subscriptionSource || 'none',
+    isOverride: false,
+    overridePlan: 'none',
+  };
+};
+
+const isSubscriptionActive = (user) => {
+  return getEffectiveSubscriptionState(user).isActive;
 };
 
 const getCurrentPlan = (user) => {
-  if (isSubscriptionActive(user)) {
+  const subscriptionState = getEffectiveSubscriptionState(user);
+
+  if (subscriptionState.planKey === 'pro') {
     return SUBSCRIPTION_PLANS.pro;
   }
 
@@ -47,15 +98,69 @@ const getOneTimeProductForUser = (kind, user) => {
   };
 };
 
+const getCurrentMonthWindow = (now = new Date()) => {
+  const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const nextPeriodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+  return {
+    periodStart,
+    nextPeriodStart,
+  };
+};
+
+const getIncludedUsageCountForCurrentMonth = async ({ userId, featureKey }) => {
+  const { periodStart, nextPeriodStart } = getCurrentMonthWindow();
+
+  const count = await FeatureUsage.countDocuments({
+    user: userId,
+    featureKey,
+    source: 'subscription_included',
+    occurredAt: {
+      $gte: periodStart,
+      $lt: nextPeriodStart,
+    },
+  });
+
+  return {
+    count,
+    periodStart,
+    nextPeriodStart,
+  };
+};
+
 const getFeatureAccessState = async ({ user, featureKey, resourceId }) => {
   const rule = FEATURE_RULES[featureKey];
   if (!rule) {
     throw new Error(`Unknown feature key: ${featureKey}`);
   }
 
-  const hasActiveSubscription = rule.subscriptionGrantsAccess
-    ? isSubscriptionActive(user)
-    : false;
+  const subscriptionState = getEffectiveSubscriptionState(user);
+  const hasActiveSubscription = Boolean(
+    rule.subscriptionPlan &&
+      subscriptionState.isActive &&
+      subscriptionState.planKey === rule.subscriptionPlan
+  );
+
+  const monthlyIncludedLimit = hasActiveSubscription
+    ? rule.subscriptionMonthlyIncludedQuantity || 0
+    : 0;
+
+  let monthlyIncludedUsedCount = 0;
+  let monthlyIncludedRemainingCount = 0;
+  let monthlyIncludedResetsAt = null;
+  let hasIncludedUsageRemaining = false;
+
+  if (monthlyIncludedLimit > 0) {
+    const usage = await getIncludedUsageCountForCurrentMonth({
+      userId: user._id,
+      featureKey,
+    });
+
+    monthlyIncludedUsedCount = usage.count;
+    monthlyIncludedRemainingCount = Math.max(monthlyIncludedLimit - usage.count, 0);
+    monthlyIncludedResetsAt = usage.nextPeriodStart;
+    hasIncludedUsageRemaining = monthlyIncludedRemainingCount > 0;
+  }
 
   let matchingPurchase = null;
   if (rule.oneTimeProductKey && resourceId) {
@@ -67,13 +172,35 @@ const getFeatureAccessState = async ({ user, featureKey, resourceId }) => {
     }).sort({ createdAt: -1 });
   }
 
+  const subscriptionUnlimitedAccessGranted = rule.subscriptionGrantsAccess
+    ? hasActiveSubscription
+    : false;
+
+  const subscriptionIncludedAccessGranted = hasIncludedUsageRemaining;
+
+  let accessSource = null;
+  if (subscriptionUnlimitedAccessGranted) {
+    accessSource = 'subscription_unlimited';
+  } else if (subscriptionIncludedAccessGranted) {
+    accessSource = 'subscription_included';
+  } else if (matchingPurchase) {
+    accessSource = 'one_time_purchase';
+  }
+
   return {
     featureKey,
     hasActiveSubscription,
     hasUnusedPurchase: Boolean(matchingPurchase),
-    accessGranted: hasActiveSubscription || Boolean(matchingPurchase),
+    accessGranted:
+      subscriptionUnlimitedAccessGranted || subscriptionIncludedAccessGranted || Boolean(matchingPurchase),
+    accessSource,
     planKey: getCurrentPlan(user).key,
     purchase: matchingPurchase,
+    monthlyIncludedLimit,
+    monthlyIncludedUsedCount,
+    monthlyIncludedRemainingCount,
+    monthlyIncludedResetsAt,
+    hasIncludedUsageRemaining,
   };
 };
 
@@ -96,10 +223,25 @@ const consumeMatchingPurchase = async ({ userId, kind, resourceId }) => {
   return purchase;
 };
 
+const recordFeatureUsage = async ({ userId, featureKey, resourceType = null, resourceId = null, source, metadata = {} }) => {
+  return FeatureUsage.create({
+    user: userId,
+    featureKey,
+    resourceType,
+    resourceId,
+    source,
+    metadata,
+  });
+};
+
 module.exports = {
   consumeMatchingPurchase,
+  getCurrentMonthWindow,
+  getEffectiveSubscriptionState,
+  getIncludedUsageCountForCurrentMonth,
   getCurrentPlan,
   getFeatureAccessState,
   getOneTimeProductForUser,
   isSubscriptionActive,
+  recordFeatureUsage,
 };

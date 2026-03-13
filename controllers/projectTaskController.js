@@ -4,34 +4,84 @@ const Investment = require('../models/Investment');
 // Utility to update investment progress
 const updateInvestmentProgress = async (investmentId) => {
   const tasks = await ProjectTask.find({ investment: investmentId });
-  const completed = tasks.filter(t => t.status === 'Complete').length;
+  const completed = tasks.filter((task) => task.status === 'Complete').length;
   const progress = tasks.length > 0 ? Math.round((completed / tasks.length) * 100) : 0;
   await Investment.findByIdAndUpdate(investmentId, { progress });
 };
 
+const getAuthorizedInvestment = async (investmentId, userId) => {
+  const investment = await Investment.findById(investmentId);
+  if (!investment || investment.user.toString() !== userId) {
+    return null;
+  }
+  return investment;
+};
+
+const getAuthorizedTask = async (taskId, userId) => {
+  const task = await ProjectTask.findById(taskId);
+
+  if (!task) {
+    return { error: { status: 404, msg: 'Task not found.' } };
+  }
+
+  const investment = await getAuthorizedInvestment(task.investment, userId);
+  if (!investment) {
+    return { error: { status: 401, msg: 'Unauthorized' } };
+  }
+
+  return { task, investment };
+};
+
+const normalizeSubtasks = (subtasks) =>
+  Array.isArray(subtasks)
+    ? subtasks
+        .filter((subtask) => subtask?.title)
+        .map((subtask) => ({
+          title: subtask.title,
+          done: Boolean(subtask.done),
+        }))
+    : [];
+
 // @desc    Create a new project task
 exports.createTask = async (req, res) => {
   try {
-    const { investmentId, title, startDate, endDate, status, assignee, dependencies } = req.body;
+    const {
+      investmentId,
+      title,
+      description,
+      startDate,
+      endDate,
+      status,
+      assignee,
+      type,
+      phase,
+      reminderOn,
+      dependencies,
+      subtasks,
+    } = req.body;
 
     if (!investmentId || !title || !startDate || !endDate) {
       return res.status(400).json({ msg: 'Please provide all required fields for the task.' });
     }
 
-    const investment = await Investment.findById(investmentId);
-    if (!investment || investment.user.toString() !== req.user.id) {
+    const investment = await getAuthorizedInvestment(investmentId, req.user.id);
+    if (!investment) {
       return res.status(401).json({ msg: 'Not authorized for this investment.' });
     }
 
     const newTask = new ProjectTask({
       investment: investmentId,
-      user: req.user.id,
       title,
+      description: description || '',
       startDate,
       endDate,
-      status,
-      assignee,
-      dependencies
+      status: status || 'Not Started',
+      assignee: assignee || undefined,
+      type: type || 'vendor',
+      phase: phase || '',
+      reminderOn: reminderOn || undefined,
+      dependencies: Array.isArray(dependencies) ? dependencies : [],
+      subtasks: normalizeSubtasks(subtasks),
     });
 
     await newTask.save();
@@ -47,8 +97,8 @@ exports.createTask = async (req, res) => {
 exports.getTasksForInvestment = async (req, res) => {
   try {
     const { investmentId } = req.params;
-    const investment = await Investment.findById(investmentId);
-    if (!investment || investment.user.toString() !== req.user.id) {
+    const investment = await getAuthorizedInvestment(investmentId, req.user.id);
+    if (!investment) {
       return res.status(401).json({ msg: 'Not authorized to view this investment.' });
     }
 
@@ -66,17 +116,40 @@ exports.getTasksForInvestment = async (req, res) => {
 // @desc    Update a project task
 exports.updateTask = async (req, res) => {
   try {
-    const task = await ProjectTask.findById(req.params.id);
-    if (!task) return res.status(404).json({ msg: 'Task not found.' });
-    if (task.user.toString() !== req.user.id) return res.status(401).json({ msg: 'Unauthorized' });
+    const { task, error } = await getAuthorizedTask(req.params.id, req.user.id);
+    if (error) {
+      return res.status(error.status).json({ msg: error.msg });
+    }
 
-    const { title, startDate, endDate, status, assignee, dependencies } = req.body;
-    if (title) task.title = title;
-    if (startDate) task.startDate = startDate;
-    if (endDate) task.endDate = endDate;
-    if (status) task.status = status;
-    if (assignee) task.assignee = assignee;
-    if (dependencies) task.dependencies = dependencies;
+    const {
+      title,
+      description,
+      startDate,
+      endDate,
+      status,
+      assignee,
+      type,
+      phase,
+      reminderOn,
+      dependencies,
+      subtasks,
+    } = req.body;
+
+    if (title !== undefined) task.title = title;
+    if (description !== undefined) task.description = description;
+    if (startDate !== undefined) task.startDate = startDate;
+    if (endDate !== undefined) task.endDate = endDate;
+    if (status !== undefined) task.status = status;
+    if (assignee !== undefined) task.assignee = assignee || undefined;
+    if (type !== undefined) task.type = type;
+    if (phase !== undefined) task.phase = phase;
+    if (reminderOn !== undefined) task.reminderOn = reminderOn || undefined;
+    if (dependencies !== undefined) {
+      task.dependencies = Array.isArray(dependencies) ? dependencies : [];
+    }
+    if (subtasks !== undefined) {
+      task.subtasks = normalizeSubtasks(subtasks);
+    }
 
     await task.save();
     await updateInvestmentProgress(task.investment);
@@ -90,9 +163,10 @@ exports.updateTask = async (req, res) => {
 // @desc    Delete a project task
 exports.deleteTask = async (req, res) => {
   try {
-    const task = await ProjectTask.findById(req.params.id);
-    if (!task) return res.status(404).json({ msg: 'Task not found.' });
-    if (task.user.toString() !== req.user.id) return res.status(401).json({ msg: 'Unauthorized' });
+    const { task, error } = await getAuthorizedTask(req.params.id, req.user.id);
+    if (error) {
+      return res.status(error.status).json({ msg: error.msg });
+    }
 
     await ProjectTask.updateMany(
       { dependencies: req.params.id },

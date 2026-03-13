@@ -16,6 +16,12 @@ const getOpenAIClient = () => {
   });
 };
 
+const hasValue = (value) => value !== undefined && value !== null && value !== '';
+const toNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
 exports.generateAIReport = async (req, res) => {
   try {
     const openai = getOpenAIClient();
@@ -46,6 +52,30 @@ exports.generateAIReport = async (req, res) => {
       });
     }
 
+    const legacyFinancing = investment.financingDetails?.purchaseLoan || {};
+    const legacyDeal = investment.dealAnalysis || {};
+    const legacyHolding = legacyDeal.holdingCosts || {};
+    const legacySelling = legacyDeal.sellingCosts || {};
+
+    const loanAmount = hasValue(investment.loanAmount)
+      ? toNumber(investment.loanAmount, 0)
+      : toNumber(legacyFinancing.loanAmount, 0);
+    const interestRate = hasValue(investment.interestRate)
+      ? toNumber(investment.interestRate, 0)
+      : toNumber(legacyFinancing.interestRate, 0);
+    const holdingDuration = hasValue(investment.holdingMonths)
+      ? toNumber(investment.holdingMonths, 0)
+      : toNumber(legacyHolding.durationMonths, 0);
+    const buyingCosts = hasValue(investment.buyClosingCost)
+      ? toNumber(investment.buyClosingCost, 0)
+      : toNumber(legacyDeal.buyingCosts, 0);
+    const sellingCosts = hasValue(investment.sellClosingCost)
+      ? toNumber(investment.sellClosingCost, 0)
+      : toNumber(legacySelling.value, 0);
+    const sellingCostUnit = hasValue(investment.sellClosingCost)
+      ? (investment.sellClosingIsPercent ? "%" : "$")
+      : (legacySelling.isPercentage ? "%" : "$");
+
     const summaryPrompt = `You are a real estate analyst. Based on the following investment data, generate a professional report:
 
 Address: ${investment.address}
@@ -54,11 +84,11 @@ Status: ${investment.status || "Unknown"}
 Purchase Price: $${investment.purchasePrice}
 ARV: $${investment.arv}
 Rent Estimate: $${investment.rentEstimate}
-Loan Amount: $${investment.financingDetails?.purchaseLoan?.loanAmount || 0}
-Interest Rate: ${investment.financingDetails?.purchaseLoan?.interestRate || 0}%
-Holding Duration: ${investment.dealAnalysis?.holdingCosts?.durationMonths || 0} months
-Buying Costs: $${investment.dealAnalysis?.buyingCosts || 0}
-Selling Costs: ${investment.dealAnalysis?.sellingCosts?.value || 0} (${investment.dealAnalysis?.sellingCosts?.isPercentage ? "%" : "$"})
+Loan Amount: $${loanAmount}
+Interest Rate: ${interestRate}%
+Holding Duration: ${holdingDuration} months
+Buying Costs: $${buyingCosts}
+Selling Costs: ${sellingCosts} (${sellingCostUnit})
 
 Please return a 3-part summary:
 1. Executive Summary

@@ -9,6 +9,7 @@ const connectDB = require("./config/db");
 
 // --- Register all database models on startup ---
 require('./models/User'); 
+require('./models/Property');
 require('./models/Investment');
 require('./models/ManagedProperty');
 require('./models/Unit');
@@ -27,6 +28,7 @@ require('./models/Lead');
 require('./models/Bid');
 require('./models/Application');
 require('./models/Purchase');
+require('./models/FeatureUsage');
 // --- End of Model Registration ---
 
 // --- Route Imports ---

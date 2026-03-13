@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
 const ManagedPropertySchema = new mongoose.Schema({
+  property: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Property',
+    default: null,
+    index: true,
+  },
   // Link back to the original investment for historical data
   investment: { 
     type: mongoose.Schema.Types.ObjectId,

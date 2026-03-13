@@ -5,6 +5,7 @@ process.env.SKIP_REDIS_CONNECT = '1';
 
 const modelModules = [
   './models/User',
+  './models/Property',
   './models/Investment',
   './models/ManagedProperty',
   './models/Unit',

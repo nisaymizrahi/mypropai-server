@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "backfill:properties": "node scripts/backfill-property-links.js",
+    "backfill:properties:dry": "node scripts/backfill-property-links.js --dry-run",
     "postinstall": "node scripts/verify-runtime.js",
+    "report:property-links": "node scripts/report-property-links.js",
     "start": "node index.js"
   },
   "dependencies": {

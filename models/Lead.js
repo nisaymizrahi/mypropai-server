@@ -7,6 +7,12 @@ const LeadSchema = new mongoose.Schema({
     ref: 'User',
     required: true,
   },
+  property: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Property',
+    default: null,
+    index: true,
+  },
   // The full address of the potential property.
   address: {
     type: String,

@@ -6,6 +6,52 @@ const requireAuth = require("../middleware/requireAuth");
 const { generateAIReport } = require("../controllers/aiReportController");
 const { generateBudgetLines } = require("../controllers/aiBudgetController");
 const { normalizePropertyStrategy } = require("../utils/propertyStrategy");
+const { upsertCanonicalProperty } = require("../utils/propertyRecordService");
+
+const sharedInvestmentFields = new Set([
+  "address",
+  "propertyType",
+  "lotSize",
+  "sqft",
+  "bedrooms",
+  "bathrooms",
+  "yearBuilt",
+  "unitCount",
+]);
+
+const investmentFields = [
+  "address",
+  "strategy",
+  "type",
+  "status",
+  "coverImage",
+  "images",
+  "purchasePrice",
+  "arv",
+  "progress",
+  "propertyType",
+  "lotSize",
+  "sqft",
+  "bedrooms",
+  "bathrooms",
+  "yearBuilt",
+  "unitCount",
+  "inspectionNotes",
+  "buyClosingCost",
+  "buyClosingIsPercent",
+  "loanAmount",
+  "interestRate",
+  "loanTerm",
+  "loanPoints",
+  "holdingMonths",
+  "taxes",
+  "insurance",
+  "utilities",
+  "otherMonthly",
+  "sellClosingCost",
+  "sellClosingIsPercent",
+  "aiDealSummary",
+];
 
 // Helper to calculate task completion percentage
 const calculateProgress = async (investmentId) => {
@@ -27,12 +73,33 @@ const serializeInvestment = (investment, progress) => {
   };
 };
 
-const buildInvestmentPayload = (input = {}) => {
-  const payload = { ...input };
-  const strategy = normalizePropertyStrategy(input.strategy || input.type);
+const buildInvestmentPayload = (
+  input = {},
+  { includeSharedFields = true, defaultStrategy = false } = {}
+) => {
+  const payload = {};
 
-  payload.strategy = strategy;
-  payload.type = strategy;
+  investmentFields.forEach((field) => {
+    if (!Object.prototype.hasOwnProperty.call(input, field)) {
+      return;
+    }
+
+    if (!includeSharedFields && sharedInvestmentFields.has(field)) {
+      return;
+    }
+
+    payload[field] = input[field];
+  });
+
+  const hasStrategyInput =
+    Object.prototype.hasOwnProperty.call(input, "strategy") ||
+    Object.prototype.hasOwnProperty.call(input, "type");
+
+  if (hasStrategyInput || defaultStrategy) {
+    const strategy = normalizePropertyStrategy(input.strategy || input.type);
+    payload.strategy = strategy;
+    payload.type = strategy;
+  }
 
   return payload;
 };
@@ -69,8 +136,19 @@ router.get("/:id", requireAuth, async (req, res) => {
 // CREATE investment
 router.post("/", requireAuth, async (req, res) => {
   try {
-    const data = buildInvestmentPayload(req.body);
-    const investment = await Investment.create({ ...data, user: req.user.id });
+    const data = buildInvestmentPayload(req.body, {
+      includeSharedFields: true,
+      defaultStrategy: true,
+    });
+    const property = await upsertCanonicalProperty({
+      userId: req.user.id,
+      source: data,
+    });
+    const investment = await Investment.create({
+      ...data,
+      user: req.user.id,
+      property: property?._id || null,
+    });
     res.status(201).json(serializeInvestment(investment, 0));
   } catch (err) {
     res.status(500).json({ error: "Failed to create investment" });
@@ -80,13 +158,21 @@ router.post("/", requireAuth, async (req, res) => {
 // PATCH investment
 router.patch("/:id", requireAuth, async (req, res) => {
   try {
-    const updates = buildInvestmentPayload(req.body);
-    const investment = await Investment.findOneAndUpdate(
-      { _id: req.params.id, user: req.user.id },
-      { $set: updates },
-      { new: true }
-    );
+    const updates = buildInvestmentPayload(req.body, { includeSharedFields: false });
+    const investment = await Investment.findOne({ _id: req.params.id, user: req.user.id });
     if (!investment) return res.status(404).json({ message: "Not found" });
+
+    Object.assign(investment, updates);
+    const property = await upsertCanonicalProperty({
+      userId: req.user.id,
+      existingPropertyId: investment.property,
+      source: investment,
+    });
+    if (property) {
+      investment.property = property._id;
+    }
+    await investment.save();
+
     const progress = await calculateProgress(investment._id);
     res.json(serializeInvestment(investment, progress));
   } catch (err) {

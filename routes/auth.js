@@ -33,6 +33,10 @@ router.get(
         return res.redirect(`${FRONTEND_URL}/login?error=nouser`);
       }
 
+      if (req.user.accountStatus === 'suspended') {
+        return res.redirect(`${FRONTEND_URL}/login?error=suspended`);
+      }
+
       const token = jwt.sign({ userId: req.user._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
       const encodedToken = encodeURIComponent(token);
       const redirectUrl = `${FRONTEND_URL}/login-continue#token=${encodedToken}`;

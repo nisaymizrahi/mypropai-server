@@ -2,6 +2,7 @@ const jwt = require("jsonwebtoken");
 const mongoose = require('mongoose');
 const User = mongoose.model('User');
 const redisClient = require('../config/redisClient'); // 1. IMPORT REDIS CLIENT
+const { isPlatformManager } = require('../utils/platformAccess');
 
 const requireAuth = async (req, res, next) => {
   const { authorization } = req.headers;
@@ -26,7 +27,33 @@ const requireAuth = async (req, res, next) => {
         return res.status(404).json({ error: "User not found" });
     }
 
+    if (user.accountStatus === 'suspended') {
+      return res.status(403).json({ error: 'This account has been suspended' });
+    }
+
+    const impersonation = {
+      active: false,
+    };
+
+    if (decoded.impersonation) {
+      const actorUser = await User.findById(decoded.actorUserId).select('-password');
+
+      if (!actorUser || actorUser.accountStatus === 'suspended' || !isPlatformManager(actorUser)) {
+        return res.status(403).json({ error: 'Impersonation token is no longer valid' });
+      }
+
+      req.actorUser = actorUser;
+      impersonation.active = true;
+      impersonation.actorUserId = actorUser.id;
+      impersonation.actorEmail = actorUser.email;
+      impersonation.startedAt = decoded.iat ? new Date(decoded.iat * 1000) : null;
+    }
+
     req.user = user;
+    req.auth = {
+      token,
+      impersonation,
+    };
     
     next();
   } catch (err) {

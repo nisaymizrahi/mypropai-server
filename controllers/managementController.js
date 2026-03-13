@@ -13,6 +13,7 @@ const {
   isManagementEligibleStrategy,
   normalizePropertyStrategy,
 } = require('../utils/propertyStrategy');
+const { startManagementWorkspace } = require('../utils/managementWorkspaceService');
 
 // @desc    Promote an Investment to a ManagedProperty
 exports.promoteInvestment = async (req, res) => {
@@ -21,35 +22,17 @@ exports.promoteInvestment = async (req, res) => {
     if (!investment) return res.status(404).json({ msg: 'Investment not found' });
     if (investment.user.toString() !== req.user.id) return res.status(401).json({ msg: 'User not authorized' });
 
-    const strategy = normalizePropertyStrategy(investment.strategy || investment.type);
-    if (!isManagementEligibleStrategy(strategy)) {
-      return res.status(400).json({
-        msg: `${getPropertyStrategyLabel(strategy)} properties cannot be started in management. Use Fix & Rent or Rental.`,
-      });
-    }
-
-    if (investment.managedProperty) return res.status(400).json({ msg: 'This property is already being managed.' });
-
-    const managedProperty = new ManagedProperty({
-      investment: investment._id,
-      user: req.user.id,
-      address: investment.address,
+    const managedProperty = await startManagementWorkspace({
+      investment,
+      userId: req.user.id,
     });
 
-    const defaultUnit = new Unit({
-      property: managedProperty._id,
-      name: investment.unitCount > 1 ? 'Unit 1' : 'Main Unit',
-      status: 'Vacant'
-    });
-
-    managedProperty.units.push(defaultUnit._id);
-    investment.managedProperty = managedProperty._id;
-
-    await managedProperty.save();
-    await defaultUnit.save();
-    await investment.save();
     res.status(201).json(managedProperty);
   } catch (err) {
+    if (err?.status) {
+      return res.status(err.status).json({ msg: err.message });
+    }
+
     console.error(err.message);
     res.status(500).send('Server Error');
   }
@@ -66,7 +49,7 @@ exports.getManagedProperties = async (req, res) => {
   }
 };
 
-// @desc    Get "Fix and Rent" investments that are not yet managed
+// @desc    Get management-eligible investments that are not yet managed
 exports.getUnmanagedProperties = async (req, res) => {
   try {
     const unmanaged = await Investment.find({

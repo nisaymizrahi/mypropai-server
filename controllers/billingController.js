@@ -6,6 +6,7 @@ const User = require('../models/User');
 const { FEATURE_RULES, ONE_TIME_PRODUCTS, SUBSCRIPTION_PLANS } = require('../config/billingCatalog');
 const { getStripeClient } = require('../lib/stripe');
 const {
+  getEffectiveSubscriptionState,
   getCurrentPlan,
   getFeatureAccessState,
   getOneTimeProductForUser,
@@ -151,6 +152,7 @@ const syncUserSubscription = async (user, subscription, fallbackPlanKey = 'pro')
 
   user.stripeCustomerId = subscription.customer || user.stripeCustomerId;
   user.stripeSubscriptionId = subscription.id;
+  user.subscriptionSource = 'stripe';
   user.subscriptionStatus = status;
   user.subscriptionCurrentPeriodEnd = subscription.current_period_end
     ? new Date(subscription.current_period_end * 1000)
@@ -158,6 +160,7 @@ const syncUserSubscription = async (user, subscription, fallbackPlanKey = 'pro')
 
   if (SUBSCRIPTION_DEACTIVATED_STATUSES.has(status)) {
     user.subscriptionPlan = 'free';
+    user.subscriptionSource = 'none';
   } else {
     user.subscriptionPlan = planKey;
   }
@@ -269,14 +272,21 @@ exports.getBillingOverview = async (req, res) => {
 
     const purchases = await Purchase.find({ user: user._id }).sort({ createdAt: -1 }).limit(10);
     const currentPlan = getCurrentPlan(user);
+    const subscriptionState = getEffectiveSubscriptionState(user);
+    const compsUsage = await getFeatureAccessState({
+      user,
+      featureKey: 'comps_report',
+    });
 
     res.json({
       plan: {
         key: currentPlan.key,
         name: currentPlan.name,
-        status: user.subscriptionStatus || 'inactive',
-        isActive: isSubscriptionActive(user),
-        renewsAt: user.subscriptionCurrentPeriodEnd,
+        status: subscriptionState.status,
+        isActive: subscriptionState.isActive,
+        renewsAt: subscriptionState.renewsAt,
+        source: subscriptionState.source,
+        override: user.platformSubscriptionOverride || 'none',
         features: currentPlan.features,
       },
       stripe: {
@@ -296,9 +306,18 @@ exports.getBillingOverview = async (req, res) => {
             priceCents: activeProduct.activePriceCents,
             basePriceCents: product.priceCents,
             subscriberPriceCents: product.subscriberPriceCents || null,
+            monthlyIncludedQuantity: FEATURE_RULES[product.key]?.subscriptionMonthlyIncludedQuantity || 0,
             resourceType: product.resourceType,
           };
         }),
+      },
+      usage: {
+        compsReport: {
+          monthlyIncludedLimit: compsUsage.monthlyIncludedLimit,
+          monthlyIncludedUsedCount: compsUsage.monthlyIncludedUsedCount,
+          monthlyIncludedRemainingCount: compsUsage.monthlyIncludedRemainingCount,
+          monthlyIncludedResetsAt: compsUsage.monthlyIncludedResetsAt,
+        },
       },
       purchases: purchases.map(formatPurchase),
     });
@@ -336,6 +355,11 @@ exports.getResourceAccess = async (req, res) => {
       hasActiveSubscription: access.hasActiveSubscription,
       hasUnusedPurchase: access.hasUnusedPurchase,
       planKey: access.planKey,
+      accessSource: access.accessSource,
+      monthlyIncludedLimit: access.monthlyIncludedLimit,
+      monthlyIncludedUsedCount: access.monthlyIncludedUsedCount,
+      monthlyIncludedRemainingCount: access.monthlyIncludedRemainingCount,
+      monthlyIncludedResetsAt: access.monthlyIncludedResetsAt,
     });
   } catch (error) {
     console.error('Billing access error:', error);
@@ -414,6 +438,21 @@ exports.createOneTimeCheckoutSession = async (req, res) => {
     const product = getOneTimeProductForUser(kind, req.user);
     if (!product) {
       return res.status(400).json({ msg: 'Unsupported purchase type.' });
+    }
+
+    if (kind === 'comps_report') {
+      const access = await getFeatureAccessState({
+        user: req.user,
+        featureKey: 'comps_report',
+        resourceId,
+      });
+
+      if (access.accessSource === 'subscription_included') {
+        return res.json({
+          alreadyUnlocked: true,
+          msg: `This report is already included in your Pro plan. ${access.monthlyIncludedRemainingCount} monthly report${access.monthlyIncludedRemainingCount === 1 ? '' : 's'} remaining.`,
+        });
+      }
     }
 
     const target = await resolvePurchaseTarget(req.user.id, kind, resourceId);

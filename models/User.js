@@ -30,12 +30,35 @@ const userSchema = new mongoose.Schema(
       enum: ['free', 'pro'],
       default: 'free',
     },
+    subscriptionSource: {
+      type: String,
+      enum: ['none', 'stripe'],
+      default: 'none',
+    },
     subscriptionStatus: {
       type: String,
       default: 'inactive',
     },
     subscriptionCurrentPeriodEnd: {
       type: Date,
+    },
+    platformSubscriptionOverride: {
+      type: String,
+      enum: ['none', 'pro', 'free'],
+      default: 'none',
+    },
+    platformSubscriptionOverrideAt: {
+      type: Date,
+    },
+    platformSubscriptionOverrideBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    accountStatus: {
+      type: String,
+      enum: ['active', 'suspended'],
+      default: 'active',
     },
   },
   { timestamps: true }

@@ -1,9 +1,18 @@
 const mongoose = require("mongoose");
-const { PROPERTY_STRATEGIES } = require("../utils/propertyStrategy");
+const {
+  PROPERTY_STRATEGIES,
+  normalizePropertyStrategy,
+} = require("../utils/propertyStrategy");
 
 const investmentSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    property: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Property",
+      default: null,
+      index: true,
+    },
 
     // Core Info
     address: { type: String, required: true },
@@ -65,5 +74,12 @@ const investmentSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+investmentSchema.pre("validate", function normalizeLegacyStrategy(next) {
+  const normalizedStrategy = normalizePropertyStrategy(this.strategy || this.type);
+  this.strategy = normalizedStrategy;
+  this.type = normalizedStrategy;
+  next();
+});
 
 module.exports = mongoose.model("Investment", investmentSchema);
