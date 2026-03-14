@@ -1,4 +1,6 @@
 const Lead = require('../models/Lead');
+const Investment = require('../models/Investment');
+const BudgetItem = require('../models/BudgetItem');
 const OpenAI = require('openai');
 const {
   fetchRentCastValueEstimate,
@@ -208,6 +210,102 @@ const roundCurrency = (value) => {
   return Math.round(value / 1000) * 1000;
 };
 
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const matchesNumericRange = (value, min, max) => {
+  const hasRange =
+    (min !== null && min !== undefined) || (max !== null && max !== undefined);
+
+  if (hasRange && (value === null || value === undefined)) {
+    return false;
+  }
+
+  if (min !== null && min !== undefined && value < min) {
+    return false;
+  }
+
+  if (max !== null && max !== undefined && value > max) {
+    return false;
+  }
+
+  return true;
+};
+
+const normalizePropertyTypeKey = (value) => {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, '-');
+
+  if (!normalized) return '';
+  if (normalized.includes('single')) return 'single-family';
+  if (normalized.includes('condo')) return 'condo';
+  if (normalized.includes('town')) return 'townhouse';
+  if (
+    normalized.includes('multi') ||
+    normalized.includes('duplex') ||
+    normalized.includes('triplex') ||
+    normalized.includes('quadplex') ||
+    normalized.includes('apartment')
+  ) {
+    return 'multi-family';
+  }
+  if (normalized.includes('mixed')) return 'mixed-use';
+  if (
+    normalized.includes('commercial') ||
+    normalized.includes('retail') ||
+    normalized.includes('office') ||
+    normalized.includes('industrial')
+  ) {
+    return 'commercial';
+  }
+  if (normalized.includes('land') || normalized.includes('lot') || normalized.includes('vacant')) {
+    return 'land';
+  }
+  return normalized === 'other' ? 'other' : 'other';
+};
+
+const resolveComparableUnitCount = (comp = {}) =>
+  numberOrNull(comp?.features?.unitCount) ??
+  numberOrNull(comp?.unitCount) ??
+  (Array.isArray(comp?.units) ? comp.units.length : null);
+
+const derivePropertyTypeFilter = (propertyType, unitCount) => {
+  const normalizedType = normalizePropertyTypeKey(propertyType);
+  const normalizedUnitCount = numberOrNull(unitCount);
+
+  if (!normalizedType) return '';
+  if (normalizedType === 'other') return '';
+  if (normalizedType !== 'multi-family') return normalizedType;
+  if (normalizedUnitCount !== null && normalizedUnitCount >= 5) return 'multi-family-5-plus';
+  if (normalizedUnitCount !== null && normalizedUnitCount >= 2) return 'multi-family-2-4';
+  return 'multi-family-any';
+};
+
+const matchesPropertyTypeFilter = (filterValue, propertyType, unitCount) => {
+  const normalizedFilter = String(filterValue || '').trim();
+  if (!normalizedFilter) return true;
+
+  const normalizedType = normalizePropertyTypeKey(propertyType);
+  const normalizedUnitCount = numberOrNull(unitCount);
+
+  switch (normalizedFilter) {
+    case 'multi-family-any':
+      return normalizedType === 'multi-family';
+    case 'multi-family-2-4':
+      return (
+        normalizedType === 'multi-family' &&
+        normalizedUnitCount !== null &&
+        normalizedUnitCount >= 2 &&
+        normalizedUnitCount <= 4
+      );
+    case 'multi-family-5-plus':
+      return normalizedType === 'multi-family' && normalizedUnitCount !== null && normalizedUnitCount >= 5;
+    default:
+      return normalizedType === normalizePropertyTypeKey(normalizedFilter);
+  }
+};
+
 const buildLeadUpdates = (input = {}, { includeSharedFields = true } = {}) => {
   const updates = {};
   const allowedFields = includeSharedFields
@@ -298,15 +396,83 @@ const buildPublicLeadSnapshot = (lead) => ({
   renovationPlan: lead.renovationPlan,
 });
 
-const scoreComparable = (subject, comp) => {
+const cloneSerializable = (value) =>
+  value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+
+const buildProjectLeadSnapshot = (lead) => ({
+  ...buildPublicLeadSnapshot(lead),
+  compsAnalysis: cloneSerializable(lead.compsAnalysis || null),
+});
+
+const buildBudgetItemsFromLead = (lead, investmentId, userId) => {
+  const sourceItems = Array.isArray(lead?.renovationPlan?.items) ? lead.renovationPlan.items : [];
+  const normalizedItems = sourceItems
+    .map((item, index) => {
+      const name =
+        typeof item?.name === 'string' && item.name.trim()
+          ? item.name.trim()
+          : titleCaseFromSlug(item?.category || `scope-${index + 1}`) || `Scope item ${index + 1}`;
+      const budget = numberOrNull(item?.budget) ?? 0;
+
+      if (!name && budget <= 0) {
+        return null;
+      }
+
+      return {
+        investment: investmentId,
+        user: userId,
+        category: name,
+        description: typeof item?.scopeDescription === 'string' ? item.scopeDescription.trim() : '',
+        sourceRenovationItemId:
+          typeof item?.itemId === 'string' ? item.itemId.trim() : '',
+        budgetedAmount: budget,
+        originalBudgetAmount: budget,
+        status: 'Not Started',
+        awards: [],
+      };
+    })
+    .filter(Boolean);
+
+  if (normalizedItems.length > 0) {
+    return normalizedItems;
+  }
+
+  const fallbackBudget = numberOrNull(lead?.rehabEstimate);
+  if (fallbackBudget !== null && fallbackBudget > 0) {
+    return [
+      {
+        investment: investmentId,
+        user: userId,
+        category: 'Renovation',
+        description: 'Imported from the lead-level rehab estimate.',
+        sourceRenovationItemId: '',
+        budgetedAmount: fallbackBudget,
+        originalBudgetAmount: fallbackBudget,
+        status: 'Not Started',
+        awards: [],
+      },
+    ];
+  }
+
+  return [];
+};
+
+const scoreComparable = (subject, comp, propertyTypeFilter = '') => {
   let score = 0;
 
-  if (subject.propertyType && comp.propertyType && subject.propertyType !== comp.propertyType) {
+  const activePropertyTypeFilter =
+    propertyTypeFilter || derivePropertyTypeFilter(subject.propertyType, subject.unitCount);
+
+  if (activePropertyTypeFilter && !matchesPropertyTypeFilter(activePropertyTypeFilter, comp.propertyType, comp.unitCount)) {
     score += 1.5;
   }
 
   if (subject.squareFootage && comp.squareFootage) {
     score += Math.abs(subject.squareFootage - comp.squareFootage) / Math.max(subject.squareFootage, 1);
+  }
+
+  if (subject.lotSize && comp.lotSize) {
+    score += (Math.abs(subject.lotSize - comp.lotSize) / Math.max(subject.lotSize, 1)) * 0.2;
   }
 
   if (subject.bedrooms && comp.bedrooms) {
@@ -317,7 +483,7 @@ const scoreComparable = (subject, comp) => {
     score += Math.abs(subject.bathrooms - comp.bathrooms) * 0.2;
   }
 
-  if (comp.distance) {
+  if (comp.distance !== null && comp.distance !== undefined) {
     score += comp.distance * 0.75;
   }
 
@@ -360,7 +526,7 @@ const summarizeComps = (subject, comps, avmValue) => {
   };
 };
 
-const generateAiReport = async (subject, summary, comps, avmValue) => {
+const generateAiReport = async (subject, summary, comps, avmValue, analysisFilters = null) => {
   const openai = getOpenAIClient();
   if (!openai) return null;
 
@@ -368,9 +534,11 @@ const generateAiReport = async (subject, summary, comps, avmValue) => {
     subject: {
       address: subject.address,
       propertyType: subject.propertyType,
+      unitCount: subject.unitCount,
       bedrooms: subject.bedrooms,
       bathrooms: subject.bathrooms,
       squareFootage: subject.squareFootage,
+      lotSize: subject.lotSize,
       yearBuilt: subject.yearBuilt,
       sellerAskingPrice: subject.sellerAskingPrice,
       sellerName: subject.sellerName,
@@ -395,13 +563,16 @@ const generateAiReport = async (subject, summary, comps, avmValue) => {
           priceRangeHigh: avmValue.priceRangeHigh,
         }
       : null,
+    filtersUsed: analysisFilters,
     marketComparables: comps.map((comp) => ({
       address: comp.address,
       propertyType: comp.propertyType,
+      unitCount: comp.unitCount,
       compPrice: comp.salePrice,
       compDate: comp.saleDate,
       distance: comp.distance,
       squareFootage: comp.squareFootage,
+      lotSize: comp.lotSize,
       bedrooms: comp.bedrooms,
       bathrooms: comp.bathrooms,
       pricePerSqft: comp.pricePerSqft ? Math.round(comp.pricePerSqft) : null,
@@ -532,6 +703,94 @@ exports.getLeadById = async (req, res) => {
   }
 };
 
+// @desc    Promote a closed-won lead into project management
+exports.promoteLeadToProject = async (req, res) => {
+  try {
+    const lead = await Lead.findById(req.params.id);
+    if (!lead || lead.user.toString() !== req.user.id) {
+      return res.status(401).json({ msg: 'Lead not found or user not authorized.' });
+    }
+
+    if (lead.status !== 'Closed - Won') {
+      return res.status(400).json({ msg: 'Only Closed - Won leads can move into project management.' });
+    }
+
+    let existingProject = null;
+    if (lead.projectManagement) {
+      existingProject = await Investment.findOne({
+        _id: lead.projectManagement,
+        user: req.user.id,
+      })
+        .populate('property')
+        .populate('sourceLead', 'address status projectManagement');
+    }
+
+    if (!existingProject) {
+      existingProject = await Investment.findOne({
+        user: req.user.id,
+        sourceLead: lead._id,
+      })
+        .populate('property')
+        .populate('sourceLead', 'address status projectManagement');
+    }
+
+    if (existingProject) {
+      if (!lead.projectManagement) {
+        lead.projectManagement = existingProject._id;
+        await lead.save();
+      }
+
+      return res.json(existingProject);
+    }
+
+    const property = await upsertCanonicalProperty({
+      userId: req.user.id,
+      existingPropertyId: lead.property,
+      source: lead,
+    });
+
+    const project = await Investment.create({
+      user: req.user.id,
+      property: property?._id || null,
+      sourceLead: lead._id,
+      sourceLeadSnapshot: buildProjectLeadSnapshot(lead),
+      address: lead.address,
+      strategy: 'flip',
+      type: 'flip',
+      status: 'In Progress',
+      purchasePrice: numberOrNull(lead.targetOffer) ?? numberOrNull(lead.sellerAskingPrice) ?? 0,
+      arv: numberOrNull(lead.arv) ?? 0,
+      propertyType: lead.propertyType || '',
+      lotSize: numberOrNull(lead.lotSize) ?? undefined,
+      sqft: numberOrNull(lead.squareFootage) ?? undefined,
+      bedrooms: numberOrNull(lead.bedrooms) ?? undefined,
+      bathrooms: numberOrNull(lead.bathrooms) ?? undefined,
+      yearBuilt: numberOrNull(lead.yearBuilt) ?? undefined,
+      unitCount: numberOrNull(lead.unitCount) ?? undefined,
+    });
+
+    const budgetItems = buildBudgetItemsFromLead(lead, project._id, req.user.id);
+    if (budgetItems.length > 0) {
+      await BudgetItem.insertMany(budgetItems);
+    }
+
+    lead.projectManagement = project._id;
+    if (property && String(lead.property || '') !== String(property._id)) {
+      lead.property = property._id;
+    }
+    await lead.save();
+
+    const populatedProject = await Investment.findById(project._id)
+      .populate('property')
+      .populate('sourceLead', 'address status projectManagement');
+
+    res.status(201).json(populatedProject);
+  } catch (error) {
+    console.error('Promote lead to project error:', error);
+    res.status(500).json({ msg: 'Server Error' });
+  }
+};
+
 // @desc    Update a lead
 exports.updateLead = async (req, res) => {
   try {
@@ -583,7 +842,16 @@ exports.deleteLead = async (req, res) => {
 exports.analyzeComps = async (req, res) => {
   try {
     const { id } = req.params;
-    const { radius, saleDateMonths, maxComps } = req.body;
+    const {
+      radius,
+      saleDateMonths,
+      maxComps,
+      propertyType: requestedPropertyTypeRaw,
+      minSquareFootage,
+      maxSquareFootage,
+      minLotSize,
+      maxLotSize,
+    } = req.body;
 
     const lead = await Lead.findById(id);
     if (!lead || lead.user.toString() !== req.user.id) {
@@ -616,32 +884,77 @@ exports.analyzeComps = async (req, res) => {
 
     const preview = await getLeadPropertyPreview(buildPublicLeadSnapshot(lead)).catch(() => null);
     const subject = mergeLeadWithPreview(buildPublicLeadSnapshot(lead), preview || {});
-
-    if (!subject.latitude || !subject.longitude) {
-      return res.status(400).json({ msg: 'This lead is missing location data. Re-save the address to refresh property details.' });
-    }
+    const requestedRadius = clamp(numberOrNull(radius) ?? 1, 0.25, 10);
+    const requestedSaleDateMonths = clamp(numberOrNull(saleDateMonths) ?? 6, 1, 60);
+    const requestedMaxComps = clamp(numberOrNull(maxComps) ?? 8, 5, 12);
+    const requestedPropertyType = String(requestedPropertyTypeRaw || '').trim();
+    const squareFootageInputs = [
+      numberOrNull(minSquareFootage),
+      numberOrNull(maxSquareFootage),
+    ];
+    const lotSizeInputs = [numberOrNull(minLotSize), numberOrNull(maxLotSize)];
+    const requestedMinSquareFootage =
+      squareFootageInputs[0] !== null && squareFootageInputs[1] !== null
+        ? Math.min(squareFootageInputs[0], squareFootageInputs[1])
+        : squareFootageInputs[0];
+    const requestedMaxSquareFootage =
+      squareFootageInputs[0] !== null && squareFootageInputs[1] !== null
+        ? Math.max(squareFootageInputs[0], squareFootageInputs[1])
+        : squareFootageInputs[1];
+    const requestedMinLotSize =
+      lotSizeInputs[0] !== null && lotSizeInputs[1] !== null
+        ? Math.min(lotSizeInputs[0], lotSizeInputs[1])
+        : lotSizeInputs[0];
+    const requestedMaxLotSize =
+      lotSizeInputs[0] !== null && lotSizeInputs[1] !== null
+        ? Math.max(lotSizeInputs[0], lotSizeInputs[1])
+        : lotSizeInputs[1];
+    const analysisFilters = {
+      radius: requestedRadius,
+      saleDateMonths: requestedSaleDateMonths,
+      maxComps: requestedMaxComps,
+      propertyType: requestedPropertyType,
+      minSquareFootage: requestedMinSquareFootage,
+      maxSquareFootage: requestedMaxSquareFootage,
+      minLotSize: requestedMinLotSize,
+      maxLotSize: requestedMaxLotSize,
+    };
+    const activePropertyTypeFilter =
+      requestedPropertyType || derivePropertyTypeFilter(subject.propertyType, subject.unitCount);
 
     const avmValue = await fetchRentCastValueEstimate({
       ...subject,
-      compCount: Math.min(Math.max(numberOrNull(maxComps) || 8, 6), 10),
+      compCount: requestedMaxComps,
     }).catch((error) => {
       console.error('RentCast AVM lookup failed:', error.response?.data || error.message);
       return null;
     });
 
     const compCutoff = new Date();
-    compCutoff.setMonth(compCutoff.getMonth() - (numberOrNull(saleDateMonths) || 6));
+    compCutoff.setMonth(compCutoff.getMonth() - requestedSaleDateMonths);
 
     const marketComps = (avmValue?.comparables || [])
       .map((comp) => ({
-        address: comp.formattedAddress,
+        address:
+          comp.formattedAddress ||
+          [comp.addressLine1, comp.addressLine2, comp.city, comp.state, comp.zipCode]
+            .filter(Boolean)
+            .join(', '),
         propertyType: comp.propertyType,
+        unitCount: resolveComparableUnitCount(comp),
         salePrice: numberOrNull(comp.price),
-        saleDate: comp.listedDate || comp.lastSeenDate || null,
+        saleDate:
+          comp.lastSaleDate ||
+          comp.saleDate ||
+          comp.listedDate ||
+          comp.lastSeenDate ||
+          comp.removedDate ||
+          null,
         distance: numberOrNull(comp.distance),
         bedrooms: numberOrNull(comp.bedrooms),
         bathrooms: numberOrNull(comp.bathrooms),
         squareFootage: numberOrNull(comp.squareFootage),
+        lotSize: numberOrNull(comp.lotSize),
         yearBuilt: numberOrNull(comp.yearBuilt),
         pricePerSqft: comp.price && comp.squareFootage ? comp.price / comp.squareFootage : null,
       }))
@@ -650,21 +963,43 @@ exports.analyzeComps = async (req, res) => {
         if (!comp.saleDate) return true;
         const compDate = new Date(comp.saleDate);
         return Number.isFinite(compDate.valueOf()) ? compDate >= compCutoff : true;
-      });
+      })
+      .filter(
+        (comp) =>
+          (comp.distance === null || comp.distance === undefined || comp.distance <= requestedRadius) &&
+          matchesPropertyTypeFilter(requestedPropertyType, comp.propertyType, comp.unitCount) &&
+          matchesNumericRange(
+            comp.squareFootage,
+            requestedMinSquareFootage,
+            requestedMaxSquareFootage
+          ) &&
+          matchesNumericRange(comp.lotSize, requestedMinLotSize, requestedMaxLotSize)
+      );
 
     if (!marketComps.length) {
-      return res.status(404).json({ msg: 'No comparable properties were found for this lead.' });
+      return res.status(404).json({
+        msg: 'No comparable properties matched the selected filters. Try widening the radius or relaxing the size filters.',
+      });
     }
 
     const rankedComps = marketComps
-      .map((comp) => ({ ...comp, relevanceScore: scoreComparable(subject, comp) }))
+      .map((comp) => ({
+        ...comp,
+        relevanceScore: scoreComparable(subject, comp, activePropertyTypeFilter),
+      }))
       .sort((a, b) => a.relevanceScore - b.relevanceScore)
-      .slice(0, Math.min(Math.max(numberOrNull(maxComps) || 8, 5), 12))
+      .slice(0, requestedMaxComps)
       .map(({ relevanceScore, ...comp }) => comp);
 
     const summary = summarizeComps(subject, rankedComps, avmValue);
 
-    const aiReport = await generateAiReport(subject, summary, rankedComps, avmValue).catch((error) => {
+    const aiReport = await generateAiReport(
+      subject,
+      summary,
+      rankedComps,
+      avmValue,
+      analysisFilters
+    ).catch((error) => {
       console.error('Lead AI report generation failed:', error.response?.data || error.message);
       return null;
     });
@@ -672,6 +1007,7 @@ exports.analyzeComps = async (req, res) => {
     Object.assign(lead, mergeLeadWithPreview({}, preview || {}));
     lead.compsAnalysis = {
       generatedAt: new Date(),
+      filters: analysisFilters,
       estimatedValue: summary.estimatedValue,
       estimatedValueLow: summary.estimatedValueLow,
       estimatedValueHigh: summary.estimatedValueHigh,
@@ -694,6 +1030,8 @@ exports.analyzeComps = async (req, res) => {
         bedrooms: comp.bedrooms,
         bathrooms: comp.bathrooms,
         squareFootage: comp.squareFootage,
+        lotSize: comp.lotSize,
+        unitCount: comp.unitCount,
         yearBuilt: comp.yearBuilt,
       })),
     };
@@ -708,9 +1046,14 @@ exports.analyzeComps = async (req, res) => {
         resourceId: lead._id,
         source: 'subscription_included',
         metadata: {
-          maxComps: Math.min(Math.max(numberOrNull(maxComps) || 8, 5), 12),
-          radius: numberOrNull(radius) || 1,
-          saleDateMonths: numberOrNull(saleDateMonths) || 6,
+          maxComps: requestedMaxComps,
+          radius: requestedRadius,
+          saleDateMonths: requestedSaleDateMonths,
+          propertyType: requestedPropertyType,
+          minSquareFootage: requestedMinSquareFootage,
+          maxSquareFootage: requestedMaxSquareFootage,
+          minLotSize: requestedMinLotSize,
+          maxLotSize: requestedMaxLotSize,
         },
       });
     }
@@ -728,6 +1071,7 @@ exports.analyzeComps = async (req, res) => {
       summary,
       comps: rankedComps,
       ai: aiReport,
+      filters: analysisFilters,
       generatedAt: lead.compsAnalysis.generatedAt,
     });
   } catch (error) {

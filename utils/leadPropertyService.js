@@ -61,6 +61,11 @@ const requestRentCast = async (path, params) => {
   }
 };
 
+const resolveUnitCount = (record = {}) =>
+  numberOrNull(record?.features?.unitCount) ??
+  numberOrNull(record?.unitCount) ??
+  (Array.isArray(record?.units) ? record.units.length : null);
+
 const fetchRentCastProperty = async (input) => {
   const params = buildRentCastParams(input);
   const data = await requestRentCast('/properties', params);
@@ -106,6 +111,7 @@ const formatPropertyPreview = (input = {}, property, listing) => ({
   squareFootage: numberOrNull(property?.squareFootage) ?? numberOrNull(listing?.squareFootage) ?? numberOrNull(input.squareFootage),
   lotSize: numberOrNull(property?.lotSize) ?? numberOrNull(input.lotSize),
   yearBuilt: numberOrNull(property?.yearBuilt) ?? numberOrNull(listing?.yearBuilt) ?? numberOrNull(input.yearBuilt),
+  unitCount: resolveUnitCount(property) ?? resolveUnitCount(listing) ?? numberOrNull(input.unitCount),
   sellerAskingPrice: numberOrNull(listing?.price) ?? numberOrNull(input.sellerAskingPrice),
   listingStatus: listing?.status || input.listingStatus || '',
   listedDate: listing?.listedDate || input.listedDate || null,

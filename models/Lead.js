@@ -13,6 +13,12 @@ const LeadSchema = new mongoose.Schema({
     default: null,
     index: true,
   },
+  projectManagement: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Investment',
+    default: null,
+    index: true,
+  },
   // The full address of the potential property.
   address: {
     type: String,
@@ -89,6 +95,16 @@ const LeadSchema = new mongoose.Schema({
   },
   compsAnalysis: {
     generatedAt: { type: Date },
+    filters: {
+      radius: { type: Number },
+      saleDateMonths: { type: Number },
+      maxComps: { type: Number },
+      propertyType: { type: String, trim: true },
+      minSquareFootage: { type: Number },
+      maxSquareFootage: { type: Number },
+      minLotSize: { type: Number },
+      maxLotSize: { type: Number },
+    },
     estimatedValue: { type: Number },
     estimatedValueLow: { type: Number },
     estimatedValueHigh: { type: Number },
@@ -119,6 +135,8 @@ const LeadSchema = new mongoose.Schema({
       bedrooms: { type: Number },
       bathrooms: { type: Number },
       squareFootage: { type: Number },
+      lotSize: { type: Number },
+      unitCount: { type: Number },
       yearBuilt: { type: Number },
     }],
   },
