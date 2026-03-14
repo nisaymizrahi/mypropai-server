@@ -218,6 +218,86 @@ const toValidDateOrNull = (value) => {
   return Number.isFinite(parsed.valueOf()) ? parsed : null;
 };
 
+const formatAiObjectKey = (value = '') => {
+  const normalized = String(value)
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+
+  if (!normalized) return 'Value';
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
+const stringifyAiValue = (value) => {
+  if (value === null || value === undefined) return '';
+
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : '';
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'Yes' : 'No';
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => stringifyAiValue(item)).filter(Boolean).join('\n');
+  }
+
+  if (typeof value === 'object') {
+    return Object.entries(value)
+      .map(([key, entryValue]) => {
+        const rendered = stringifyAiValue(entryValue);
+        if (!rendered) return '';
+        return `${formatAiObjectKey(key)}: ${rendered}`;
+      })
+      .filter(Boolean)
+      .join('; ');
+  }
+
+  return String(value).trim();
+};
+
+const normalizeAiList = (value) => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => stringifyAiValue(item))
+      .flatMap((item) => item.split('\n'))
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  const rendered = stringifyAiValue(value);
+  return rendered ? [rendered] : [];
+};
+
+const normalizeAiConfidence = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'low') return 'Low';
+  if (normalized === 'medium') return 'Medium';
+  if (normalized === 'high') return 'High';
+  return stringifyAiValue(value);
+};
+
+const normalizeAiReport = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  return {
+    headline: stringifyAiValue(value.headline),
+    executiveSummary: stringifyAiValue(value.executiveSummary),
+    pricingRecommendation: stringifyAiValue(value.pricingRecommendation),
+    offerStrategy: stringifyAiValue(value.offerStrategy),
+    confidence: normalizeAiConfidence(value.confidence),
+    riskFlags: normalizeAiList(value.riskFlags),
+    nextSteps: normalizeAiList(value.nextSteps),
+  };
+};
+
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
 const matchesNumericRange = (value, min, max) => {
@@ -619,7 +699,7 @@ ${JSON.stringify(payload, null, 2)}
     ],
   });
 
-  return JSON.parse(completion.choices[0].message.content);
+  return normalizeAiReport(JSON.parse(completion.choices[0].message.content));
 };
 
 // @desc    Get summary data for the leads dashboard
