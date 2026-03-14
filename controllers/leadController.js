@@ -43,6 +43,7 @@ const sharedLeadFields = [
 ];
 
 const stageLeadFields = [
+  'inPropertyWorkspace',
   'sellerAskingPrice',
   'sellerName',
   'sellerPhone',
@@ -83,6 +84,7 @@ const numericLeadFields = new Set([
 ]);
 
 const dateLeadFields = new Set(['listedDate', 'lastSaleDate', 'followUpDate']);
+const booleanLeadFields = new Set(['inPropertyWorkspace']);
 
 const booleanFromInput = (value) => {
   if (value === undefined || value === null || value === '') return null;
@@ -425,6 +427,11 @@ const buildLeadUpdates = (input = {}, { includeSharedFields = true } = {}) => {
       return;
     }
 
+    if (booleanLeadFields.has(field)) {
+      updates[field] = booleanFromInput(value) || false;
+      return;
+    }
+
     updates[field] = typeof value === 'string' ? value.trim() : value;
   });
 
@@ -486,6 +493,7 @@ const buildPublicLeadSnapshot = (lead) => ({
   lastSaleDate: lead.lastSaleDate,
   notes: lead.notes,
   status: lead.status,
+  inPropertyWorkspace: Boolean(lead.inPropertyWorkspace),
   renovationPlan: lead.renovationPlan,
 });
 

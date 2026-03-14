@@ -201,6 +201,7 @@ const buildWorkspaces = (group) => {
           id: primaryLead._id,
           count: group.leads.length,
           status: primaryLead.status,
+          inPropertyWorkspace: Boolean(primaryLead.inPropertyWorkspace),
           label: 'Pipeline',
           path: `/leads/${primaryLead._id}`,
         }

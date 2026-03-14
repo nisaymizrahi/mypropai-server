@@ -19,6 +19,11 @@ const LeadSchema = new mongoose.Schema({
     default: null,
     index: true,
   },
+  inPropertyWorkspace: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
   // The full address of the potential property.
   address: {
     type: String,
