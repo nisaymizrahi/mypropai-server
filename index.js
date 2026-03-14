@@ -29,6 +29,7 @@ require('./models/Bid');
 require('./models/Application');
 require('./models/Purchase');
 require('./models/FeatureUsage');
+require('./models/Task');
 // --- End of Model Registration ---
 
 // --- Route Imports ---
@@ -57,6 +58,7 @@ const notificationRoutes = require("./routes/notifications");
 const billingRoutes = require("./routes/billingRoutes");
 const propertyRoutes = require("./routes/properties");
 const platformManagerRoutes = require("./routes/platformManagerRoutes");
+const taskRoutes = require("./routes/taskRoutes");
 // 1. IMPORT THE NEW APPLICATION ROUTES
 const applicationRoutes = require("./routes/applicationRoutes");
 const billingController = require("./controllers/billingController");
@@ -176,6 +178,7 @@ app.use("/api/billing", requireAuth, billingRoutes);
 app.use("/api/bids", requireAuth, bidRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/properties", requireAuth, propertyRoutes);
+app.use("/api/tasks", requireAuth, taskRoutes);
 app.use("/api/platform-manager", platformManagerRoutes);
 // 2. USE THE NEW APPLICATION ROUTES
 app.use("/api/applications", applicationRoutes); // Note: Auth is handled inside the routes file
