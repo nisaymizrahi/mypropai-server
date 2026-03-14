@@ -11,6 +11,10 @@ router.use(requireAuth);
 // @desc    Upload a contractor estimate, parse it with AI, and create a new bid
 router.post('/import', uploadBidEstimate.single('estimate'), bidController.importBid);
 
+// @route   POST /api/bids
+// @desc    Create a custom/manual bid
+router.post('/', bidController.createBid);
+
 // @route   GET /api/bids/lead/:leadId
 // @desc    Get all bids for a specific lead
 router.get('/lead/:leadId', bidController.getBidsForLead);

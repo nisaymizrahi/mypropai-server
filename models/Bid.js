@@ -43,6 +43,30 @@ const BidRenovationAssignmentSchema = new mongoose.Schema({
   }],
 }, { _id: false });
 
+const BidVendorSnapshotSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    trim: true,
+  },
+  contactName: {
+    type: String,
+    trim: true,
+  },
+  email: {
+    type: String,
+    trim: true,
+    lowercase: true,
+  },
+  phone: {
+    type: String,
+    trim: true,
+  },
+  address: {
+    type: String,
+    trim: true,
+  },
+}, { _id: false });
+
 // This is the main schema for a single, complete bid from a contractor
 const BidSchema = new mongoose.Schema({
   // Link to the user who owns this bid
@@ -56,6 +80,11 @@ const BidSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Lead',
     required: true,
+  },
+  vendor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Vendor',
+    default: null,
   },
   // The contractor's details, extracted by the AI
   contractorName: {
@@ -71,6 +100,11 @@ const BidSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+  sourceType: {
+    type: String,
+    enum: ['imported', 'manual'],
+    default: 'imported',
+  },
   sourceFileName: {
     type: String,
     trim: true,
@@ -79,6 +113,12 @@ const BidSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+  notes: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  vendorSnapshot: BidVendorSnapshotSchema,
   // The array of all line items parsed from the estimate
   items: [BidItemSchema],
   renovationAssignments: [BidRenovationAssignmentSchema],

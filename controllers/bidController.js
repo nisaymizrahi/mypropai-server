@@ -1,5 +1,6 @@
 const Bid = require('../models/Bid');
 const Lead = require('../models/Lead');
+const Vendor = require('../models/Vendor');
 const OpenAI = require('openai');
 const axios = require('axios');
 
@@ -37,6 +38,19 @@ const clampConfidence = (value) => {
 
     return Math.max(0, Math.min(1, parsed));
 };
+
+const normalizeOptionalString = (value) => {
+    if (value === null || value === undefined) {
+        return '';
+    }
+
+    return String(value).trim();
+};
+
+const normalizePhoneKey = (value) =>
+    String(value || '')
+        .replace(/[^0-9]/g, '')
+        .trim();
 
 const sanitizeBidItems = (input = []) => {
     if (!Array.isArray(input)) {
@@ -86,6 +100,60 @@ const buildRenovationItemContext = (lead) => {
             };
         })
         .filter(Boolean);
+};
+
+const buildVendorSnapshot = (input = {}, fallbackName = '') => {
+    const snapshot = {
+        name: normalizeOptionalString(input.name || fallbackName),
+        contactName: normalizeOptionalString(input.contactName),
+        email: normalizeOptionalString(input.email).toLowerCase(),
+        phone: normalizeOptionalString(input.phone),
+        address: normalizeOptionalString(input.address),
+    };
+
+    return Object.values(snapshot).some(Boolean) ? snapshot : null;
+};
+
+const buildVendorSnapshotFromVendor = (vendor) => {
+    if (!vendor) {
+        return null;
+    }
+
+    return buildVendorSnapshot({
+        name: vendor.name,
+        contactName: vendor.contactInfo?.contactName,
+        email: vendor.contactInfo?.email,
+        phone: vendor.contactInfo?.phone,
+        address: vendor.contactInfo?.address,
+    });
+};
+
+const populateBidVendor = async (bid) => bid.populate('vendor', 'name trade specialties contactInfo');
+
+const findMatchingVendor = async (userId, vendorSnapshot = {}, contractorName = '') => {
+    const normalizedName = normalizeOptionalString(vendorSnapshot.name || contractorName).toLowerCase();
+    const normalizedEmail = normalizeOptionalString(vendorSnapshot.email).toLowerCase();
+    const normalizedPhone = normalizePhoneKey(vendorSnapshot.phone);
+
+    if (!normalizedName && !normalizedEmail && !normalizedPhone) {
+        return null;
+    }
+
+    const vendors = await Vendor.find({ user: userId }).select('name contactInfo trade specialties');
+
+    return (
+        vendors.find((vendor) => {
+            const vendorName = normalizeOptionalString(vendor.name).toLowerCase();
+            const vendorEmail = normalizeOptionalString(vendor.contactInfo?.email).toLowerCase();
+            const vendorPhone = normalizePhoneKey(vendor.contactInfo?.phone);
+
+            return (
+                (normalizedEmail && vendorEmail && normalizedEmail === vendorEmail) ||
+                (normalizedPhone && vendorPhone && normalizedPhone === vendorPhone) ||
+                (normalizedName && vendorName && normalizedName === vendorName)
+            );
+        }) || null
+    );
 };
 
 const normalizeKeyword = (value = '') =>
@@ -209,6 +277,28 @@ const deriveAssignmentsFromItems = (bidItems = [], renovationItems = []) => {
     return [...assignmentMap.values()];
 };
 
+const getAuthorizedLead = async (leadId, userId) => {
+    const lead = await Lead.findById(leadId);
+    if (!lead || lead.user.toString() !== userId) {
+        return null;
+    }
+
+    return lead;
+};
+
+const getAuthorizedVendor = async (vendorId, userId) => {
+    if (!vendorId) {
+        return null;
+    }
+
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor || vendor.user.toString() !== userId) {
+        return null;
+    }
+
+    return vendor;
+};
+
 // @desc    Upload an estimate, parse it with AI, and create a new bid
 exports.importBid = async (req, res) => {
     try {
@@ -222,8 +312,8 @@ exports.importBid = async (req, res) => {
             return res.status(400).json({ msg: 'Estimate file is required.' });
         }
 
-        const lead = await Lead.findById(leadId);
-        if (!lead || lead.user.toString() !== req.user.id) {
+        const lead = await getAuthorizedLead(leadId, req.user.id);
+        if (!lead) {
             return res.status(401).json({ msg: 'Lead not found or user not authorized.' });
         }
 
@@ -258,6 +348,10 @@ exports.importBid = async (req, res) => {
         
         const systemPrompt = `You are an expert data extraction bot for real estate contractor estimates. Analyze the OCR text from a contractor bid and extract structured data. Return a valid JSON object with these keys:
 "contractorName": string
+"contractorContactName": string
+"contractorEmail": string
+"contractorPhone": string
+"contractorAddress": string
 "totalAmount": number
 "items": array of objects with "description", "cost", and optional "category"
 "renovationAssignments": array of objects with "renovationItemId", "renovationItemName", "amount", optional "scopeSummary", optional "matchedLineItems", and optional "confidence"
@@ -284,19 +378,36 @@ If a quote clearly covers one or more renovation items provided by the user, map
         const totalAmount =
             normalizeCurrencyValue(structuredData.totalAmount) ??
             validItems.reduce((sum, item) => sum + item.cost, 0);
+        const vendorSnapshot = buildVendorSnapshot({
+            name: structuredData.contractorName,
+            contactName: structuredData.contractorContactName,
+            email: structuredData.contractorEmail,
+            phone: structuredData.contractorPhone,
+            address: structuredData.contractorAddress,
+        });
+        const matchedVendor = await findMatchingVendor(
+            req.user.id,
+            vendorSnapshot,
+            structuredData.contractorName
+        );
 
         const newBid = new Bid({
             user: req.user.id,
             lead: leadId,
             contractorName: structuredData.contractorName,
             totalAmount,
+            vendor: matchedVendor?._id || null,
+            sourceType: 'imported',
             sourceFileName: req.file.originalname,
             sourceDocumentUrl: req.file.path,
+            notes: '',
+            vendorSnapshot,
             items: validItems,
             renovationAssignments: fallbackAssignments,
         });
 
         await newBid.save();
+        await populateBidVendor(newBid);
         res.status(201).json(newBid);
 
     } catch (error) {
@@ -309,11 +420,13 @@ If a quote clearly covers one or more renovation items provided by the user, map
 exports.getBidsForLead = async (req, res) => {
     try {
         const { leadId } = req.params;
-        const lead = await Lead.findById(leadId);
-        if (!lead || lead.user.toString() !== req.user.id) {
+        const lead = await getAuthorizedLead(leadId, req.user.id);
+        if (!lead) {
             return res.status(401).json({ msg: 'Lead not found or user not authorized.' });
         }
-        const bids = await Bid.find({ lead: leadId }).sort({ createdAt: -1 });
+        const bids = await Bid.find({ lead: leadId })
+            .populate('vendor', 'name trade specialties contactInfo')
+            .sort({ createdAt: -1 });
         res.json(bids);
     } catch (error) {
         console.error('Error fetching bids:', error);
@@ -321,10 +434,77 @@ exports.getBidsForLead = async (req, res) => {
     }
 };
 
+// @desc    Create a custom bid
+exports.createBid = async (req, res) => {
+    try {
+        const {
+            leadId,
+            vendorId,
+            contractorName,
+            totalAmount,
+            items,
+            renovationAssignments,
+            notes,
+        } = req.body;
+
+        const lead = await getAuthorizedLead(leadId, req.user.id);
+        if (!lead) {
+            return res.status(401).json({ msg: 'Lead not found or user not authorized.' });
+        }
+
+        const vendor = await getAuthorizedVendor(vendorId, req.user.id);
+        if (vendorId && !vendor) {
+            return res.status(400).json({ msg: 'Selected vendor was not found.' });
+        }
+
+        const renovationItems = buildRenovationItemContext(lead);
+        const sanitizedItems = Array.isArray(items) ? sanitizeBidItems(items) : [];
+        const sanitizedAssignments = Array.isArray(renovationAssignments)
+            ? sanitizeBidAssignments(renovationAssignments, renovationItems)
+            : [];
+        const assignmentTotal = sanitizedAssignments.reduce(
+            (sum, assignment) => sum + (assignment.amount || 0),
+            0
+        );
+        const itemTotal = sanitizedItems.reduce((sum, item) => sum + (item.cost || 0), 0);
+        const derivedTotal =
+            normalizeCurrencyValue(totalAmount) ??
+            (sanitizedAssignments.length ? assignmentTotal : itemTotal);
+
+        if (!vendor && !normalizeOptionalString(contractorName)) {
+            return res.status(400).json({ msg: 'Choose a vendor for this custom quote.' });
+        }
+
+        if (sanitizedAssignments.length === 0 && sanitizedItems.length === 0) {
+            return res.status(400).json({ msg: 'Add at least one renovation item amount for this quote.' });
+        }
+
+        const bid = new Bid({
+            user: req.user.id,
+            lead: leadId,
+            vendor: vendor?._id || null,
+            contractorName: normalizeOptionalString(contractorName) || vendor?.name || 'Custom quote',
+            totalAmount: derivedTotal,
+            sourceType: 'manual',
+            notes: normalizeOptionalString(notes),
+            vendorSnapshot: buildVendorSnapshotFromVendor(vendor) || buildVendorSnapshot({ name: contractorName }),
+            items: sanitizedItems,
+            renovationAssignments: sanitizedAssignments,
+        });
+
+        await bid.save();
+        await populateBidVendor(bid);
+        res.status(201).json(bid);
+    } catch (error) {
+        console.error('Error creating bid:', error);
+        res.status(500).json({ msg: 'Server Error' });
+    }
+};
+
 // ✅ NEW: Function to update an existing bid
 exports.updateBid = async (req, res) => {
     try {
-        const { contractorName, totalAmount, items, renovationAssignments } = req.body;
+        const { contractorName, totalAmount, items, renovationAssignments, vendorId, notes } = req.body;
         const bid = await Bid.findById(req.params.id);
 
         if (!bid || bid.user.toString() !== req.user.id) {
@@ -333,6 +513,13 @@ exports.updateBid = async (req, res) => {
 
         const lead = await Lead.findById(bid.lead);
         const renovationItems = buildRenovationItemContext(lead);
+        const vendor = vendorId !== undefined
+            ? await getAuthorizedVendor(vendorId, req.user.id)
+            : null;
+
+        if (vendorId && !vendor) {
+            return res.status(400).json({ msg: 'Selected vendor was not found.' });
+        }
 
         bid.contractorName = contractorName || bid.contractorName;
         bid.totalAmount = normalizeCurrencyValue(totalAmount) ?? bid.totalAmount;
@@ -340,8 +527,19 @@ exports.updateBid = async (req, res) => {
         bid.renovationAssignments = Array.isArray(renovationAssignments)
             ? sanitizeBidAssignments(renovationAssignments, renovationItems)
             : bid.renovationAssignments;
+        if (vendorId !== undefined) {
+            bid.vendor = vendor?._id || null;
+            if (vendor) {
+                bid.contractorName = bid.contractorName || vendor.name;
+                bid.vendorSnapshot = buildVendorSnapshotFromVendor(vendor);
+            }
+        }
+        if (notes !== undefined) {
+            bid.notes = normalizeOptionalString(notes);
+        }
 
         await bid.save();
+        await populateBidVendor(bid);
         res.json(bid);
     } catch (error) {
         console.error('Error updating bid:', error);
