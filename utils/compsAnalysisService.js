@@ -280,7 +280,7 @@ const buildValuationContext = (avmValue = {}) => {
   };
 };
 
-const scoreComparable = (subject, comp, propertyTypeFilter = "") => {
+const scoreComparable = (subject, comp, propertyTypeFilter = "", searchRadius = 1) => {
   let score = 0;
 
   const activePropertyTypeFilter =
@@ -310,7 +310,10 @@ const scoreComparable = (subject, comp, propertyTypeFilter = "") => {
   }
 
   if (comp.distance !== null && comp.distance !== undefined) {
-    score += comp.distance * 0.75;
+    // Treat radius as part of the ranking context so widening the search
+    // meaningfully relaxes the distance penalty instead of returning the
+    // exact same nearest-only set in dense markets.
+    score += (comp.distance / Math.max(searchRadius, 0.25)) * 0.75;
   }
 
   if (comp.saleDate) {
@@ -491,7 +494,9 @@ const buildCompsAnalysis = async (subject, rawFilters = {}) => {
 
   const avmValue = await fetchRentCastValueEstimate({
     ...subject,
-    compCount: Math.max(requestedMaxComps, 20),
+    // Pull the maximum comparable set allowed by RentCast so a wider radius
+    // can actually surface additional candidate comps before local ranking.
+    compCount: 25,
     maxRadius: requestedRadius,
     daysOld: Math.max(1, Math.round(requestedSaleDateMonths * 30)),
   }).catch((error) => {
@@ -537,7 +542,12 @@ const buildCompsAnalysis = async (subject, rawFilters = {}) => {
   const rankedComps = marketComps
     .map((comp) => ({
       ...comp,
-      relevanceScore: scoreComparable(subject, comp, activePropertyTypeFilter),
+      relevanceScore: scoreComparable(
+        subject,
+        comp,
+        activePropertyTypeFilter,
+        requestedRadius
+      ),
     }))
     .sort((a, b) => a.relevanceScore - b.relevanceScore)
     .slice(0, requestedMaxComps)
