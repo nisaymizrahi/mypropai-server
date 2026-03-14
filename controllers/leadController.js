@@ -1034,9 +1034,9 @@ exports.analyzeComps = async (req, res) => {
     });
 
     analysisStep = 'saving comps analysis to lead';
-    Object.assign(lead, mergeLeadWithPreview({}, preview || {}));
-    lead.compsAnalysis = {
-      generatedAt: new Date(),
+    const generatedAt = new Date();
+    const nextCompsAnalysis = {
+      generatedAt,
       filters: analysisFilters,
       estimatedValue: summary.estimatedValue,
       estimatedValueLow: summary.estimatedValueLow,
@@ -1066,7 +1066,17 @@ exports.analyzeComps = async (req, res) => {
       })),
     };
 
-    await lead.save();
+    await Lead.updateOne(
+      {
+        _id: lead._id,
+        user: req.user.id,
+      },
+      {
+        $set: {
+          compsAnalysis: nextCompsAnalysis,
+        },
+      }
+    );
 
     if (access.accessSource === 'subscription_included') {
       analysisStep = 'recording feature usage';
@@ -1119,13 +1129,22 @@ exports.analyzeComps = async (req, res) => {
       comps: rankedComps,
       ai: aiReport,
       filters: analysisFilters,
-      generatedAt: lead.compsAnalysis.generatedAt,
+      generatedAt,
     });
   } catch (error) {
+    const detail =
+      error?.response?.data?.msg ||
+      error?.response?.data?.message ||
+      error?.message ||
+      'Unexpected comps analysis error.';
     console.error(
       `Error analyzing lead comps during ${analysisStep}:`,
       error.response?.data || error.stack || error.message || error
     );
-    res.status(500).json({ msg: 'Server error during comps analysis.' });
+    res.status(500).json({
+      msg: 'Server error during comps analysis.',
+      step: analysisStep,
+      detail,
+    });
   }
 };
