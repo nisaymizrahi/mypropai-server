@@ -840,7 +840,9 @@ exports.deleteLead = async (req, res) => {
 
 // @desc    Run the AI comps analysis for a specific lead
 exports.analyzeComps = async (req, res) => {
+  let analysisStep = 'initializing request';
   try {
+    analysisStep = 'loading lead';
     const { id } = req.params;
     const {
       radius,
@@ -858,6 +860,7 @@ exports.analyzeComps = async (req, res) => {
       return res.status(401).json({ msg: 'Lead not found or user not authorized.' });
     }
 
+    analysisStep = 'checking billing access';
     const access = await getFeatureAccessState({
       user: req.user,
       featureKey: 'comps_report',
@@ -882,6 +885,7 @@ exports.analyzeComps = async (req, res) => {
       });
     }
 
+    analysisStep = 'refreshing property preview';
     const preview = await getLeadPropertyPreview(buildPublicLeadSnapshot(lead)).catch(() => null);
     const subject = mergeLeadWithPreview(buildPublicLeadSnapshot(lead), preview || {});
     const requestedRadius = clamp(numberOrNull(radius) ?? 1, 0.25, 10);
@@ -922,6 +926,7 @@ exports.analyzeComps = async (req, res) => {
     const activePropertyTypeFilter =
       requestedPropertyType || derivePropertyTypeFilter(subject.propertyType, subject.unitCount);
 
+    analysisStep = 'fetching AVM comparables';
     const avmValue = await fetchRentCastValueEstimate({
       ...subject,
       compCount: requestedMaxComps,
@@ -930,6 +935,7 @@ exports.analyzeComps = async (req, res) => {
       return null;
     });
 
+    analysisStep = 'filtering comparable properties';
     const compCutoff = new Date();
     compCutoff.setMonth(compCutoff.getMonth() - requestedSaleDateMonths);
 
@@ -990,6 +996,7 @@ exports.analyzeComps = async (req, res) => {
       });
     }
 
+    analysisStep = 'ranking comparable properties';
     const rankedComps = marketComps
       .map((comp) => ({
         ...comp,
@@ -999,8 +1006,10 @@ exports.analyzeComps = async (req, res) => {
       .slice(0, requestedMaxComps)
       .map(({ relevanceScore, ...comp }) => comp);
 
+    analysisStep = 'summarizing comparable properties';
     const summary = summarizeComps(subject, rankedComps, avmValue);
 
+    analysisStep = 'generating AI report';
     const aiReport = await generateAiReport(
       subject,
       summary,
@@ -1012,6 +1021,7 @@ exports.analyzeComps = async (req, res) => {
       return null;
     });
 
+    analysisStep = 'saving comps analysis to lead';
     Object.assign(lead, mergeLeadWithPreview({}, preview || {}));
     lead.compsAnalysis = {
       generatedAt: new Date(),
@@ -1047,33 +1057,50 @@ exports.analyzeComps = async (req, res) => {
     await lead.save();
 
     if (access.accessSource === 'subscription_included') {
-      await recordFeatureUsage({
-        userId: req.user.id,
-        featureKey: 'comps_report',
-        resourceType: 'lead',
-        resourceId: lead._id,
-        source: 'subscription_included',
-        metadata: {
-          maxComps: requestedMaxComps,
-          radius: requestedRadius,
-          saleDateMonths: requestedSaleDateMonths,
-          propertyType: requestedPropertyType,
-          minSquareFootage: requestedMinSquareFootage,
-          maxSquareFootage: requestedMaxSquareFootage,
-          minLotSize: requestedMinLotSize,
-          maxLotSize: requestedMaxLotSize,
-        },
-      });
+      analysisStep = 'recording feature usage';
+      try {
+        await recordFeatureUsage({
+          userId: req.user.id,
+          featureKey: 'comps_report',
+          resourceType: 'lead',
+          resourceId: lead._id,
+          source: 'subscription_included',
+          metadata: {
+            maxComps: requestedMaxComps,
+            radius: requestedRadius,
+            saleDateMonths: requestedSaleDateMonths,
+            propertyType: requestedPropertyType,
+            minSquareFootage: requestedMinSquareFootage,
+            maxSquareFootage: requestedMaxSquareFootage,
+            minLotSize: requestedMinLotSize,
+            maxLotSize: requestedMaxLotSize,
+          },
+        });
+      } catch (usageError) {
+        console.error(
+          'Comps analysis usage logging failed:',
+          usageError.response?.data || usageError.message || usageError
+        );
+      }
     }
 
     if (access.accessSource === 'one_time_purchase' && access.hasUnusedPurchase) {
-      await consumeMatchingPurchase({
-        userId: req.user.id,
-        kind: 'comps_report',
-        resourceId: lead._id,
-      });
+      analysisStep = 'consuming one-time report purchase';
+      try {
+        await consumeMatchingPurchase({
+          userId: req.user.id,
+          kind: 'comps_report',
+          resourceId: lead._id,
+        });
+      } catch (purchaseError) {
+        console.error(
+          'Comps analysis purchase consumption failed:',
+          purchaseError.response?.data || purchaseError.message || purchaseError
+        );
+      }
     }
 
+    analysisStep = 'returning response';
     res.status(200).json({
       subject,
       summary,
@@ -1083,7 +1110,10 @@ exports.analyzeComps = async (req, res) => {
       generatedAt: lead.compsAnalysis.generatedAt,
     });
   } catch (error) {
-    console.error('Error analyzing lead comps:', error.response?.data || error.message);
+    console.error(
+      `Error analyzing lead comps during ${analysisStep}:`,
+      error.response?.data || error.stack || error.message || error
+    );
     res.status(500).json({ msg: 'Server error during comps analysis.' });
   }
 };
