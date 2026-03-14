@@ -933,7 +933,8 @@ exports.analyzeComps = async (req, res) => {
     const compCutoff = new Date();
     compCutoff.setMonth(compCutoff.getMonth() - requestedSaleDateMonths);
 
-    const marketComps = (avmValue?.comparables || [])
+    const marketComps = (Array.isArray(avmValue?.comparables) ? avmValue.comparables : [])
+      .filter((comp) => comp && typeof comp === 'object' && !Array.isArray(comp))
       .map((comp) => ({
         address:
           comp.formattedAddress ||
@@ -977,8 +978,15 @@ exports.analyzeComps = async (req, res) => {
       );
 
     if (!marketComps.length) {
-      return res.status(404).json({
+      return res.status(200).json({
+        noResults: true,
         msg: 'No comparable properties matched the selected filters. Try widening the radius or relaxing the size filters.',
+        subject,
+        summary: null,
+        comps: [],
+        ai: null,
+        filters: analysisFilters,
+        generatedAt: null,
       });
     }
 
