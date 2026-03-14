@@ -78,6 +78,12 @@ const fetchRentCastSaleListing = async (input) => {
   return Array.isArray(data) ? data[0] || null : data;
 };
 
+const fetchRentCastRentalListing = async (input) => {
+  const params = buildRentCastParams(input);
+  const data = await requestRentCast('/listings/rental/long-term', params);
+  return Array.isArray(data) ? data[0] || null : data;
+};
+
 const fetchRentCastValueEstimate = async (input) => {
   const params = {
     address: buildFormattedAddress(input),
@@ -93,6 +99,25 @@ const fetchRentCastValueEstimate = async (input) => {
   if (squareFootage) params.squareFootage = squareFootage;
 
   return requestRentCast('/avm/value', params);
+};
+
+const fetchRentCastRentEstimate = async (input) => {
+  const params = {
+    address: buildFormattedAddress(input),
+    compCount: Math.min(Math.max(numberOrNull(input.compCount) || 8, 5), 12),
+  };
+
+  const propertyType = input.propertyType ? String(input.propertyType).trim() : '';
+  const bedrooms = numberOrNull(input.bedrooms);
+  const bathrooms = numberOrNull(input.bathrooms);
+  const squareFootage = numberOrNull(input.squareFootage);
+
+  if (propertyType) params.propertyType = propertyType;
+  if (bedrooms) params.bedrooms = bedrooms;
+  if (bathrooms) params.bathrooms = bathrooms;
+  if (squareFootage) params.squareFootage = squareFootage;
+
+  return requestRentCast('/avm/rent/long-term', params);
 };
 
 const formatPropertyPreview = (input = {}, property, listing) => ({
@@ -136,7 +161,12 @@ const getLeadPropertyPreview = async (input = {}) => {
 };
 
 module.exports = {
+  fetchRentCastProperty,
+  fetchRentCastRentalListing,
+  fetchRentCastRentEstimate,
+  fetchRentCastSaleListing,
   fetchRentCastValueEstimate,
+  formatPropertyPreview,
   getLeadPropertyPreview,
   numberOrNull,
 };

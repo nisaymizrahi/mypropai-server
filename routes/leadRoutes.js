@@ -25,6 +25,10 @@ router.get('/', leadController.getLeads);
 // @desc    Get a single lead by its ID
 router.get('/:id', leadController.getLeadById);
 
+// @route   POST /api/leads/:id/promote-to-project
+// @desc    Move a closed-won lead into project management
+router.post('/:id/promote-to-project', leadController.promoteLeadToProject);
+
 // @route   PATCH /api/leads/:id
 // @desc    Update a lead (e.g., change status or notes)
 router.patch('/:id', leadController.updateLead);

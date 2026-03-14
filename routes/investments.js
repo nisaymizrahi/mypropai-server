@@ -1,6 +1,9 @@
 const express = require("express");
 const router = express.Router();
 const Investment = require("../models/Investment");
+const Lead = require("../models/Lead");
+const BudgetItem = require("../models/BudgetItem");
+const Expense = require("../models/Expense");
 const ProjectTask = require("../models/ProjectTask");
 const requireAuth = require("../middleware/requireAuth");
 const { generateAIReport } = require("../controllers/aiReportController");
@@ -107,7 +110,10 @@ const buildInvestmentPayload = (
 // GET all investments
 router.get("/", requireAuth, async (req, res) => {
   try {
-    const investments = await Investment.find({ user: req.user.id }).sort({ createdAt: -1 });
+    const investments = await Investment.find({ user: req.user.id })
+      .populate("property", "address")
+      .populate("sourceLead", "address status projectManagement")
+      .sort({ createdAt: -1 });
 
     const enriched = await Promise.all(investments.map(async (inv) => {
       const progress = await calculateProgress(inv._id);
@@ -123,7 +129,9 @@ router.get("/", requireAuth, async (req, res) => {
 // GET single investment
 router.get("/:id", requireAuth, async (req, res) => {
   try {
-    const investment = await Investment.findOne({ _id: req.params.id, user: req.user.id });
+    const investment = await Investment.findOne({ _id: req.params.id, user: req.user.id })
+      .populate("property")
+      .populate("sourceLead", "address status projectManagement");
     if (!investment) return res.status(404).json({ message: "Not found" });
 
     const progress = await calculateProgress(investment._id);
@@ -185,6 +193,17 @@ router.delete("/:id", requireAuth, async (req, res) => {
   try {
     const deleted = await Investment.findOneAndDelete({ _id: req.params.id, user: req.user.id });
     if (!deleted) return res.status(404).json({ message: "Investment not found" });
+    await Promise.all([
+      deleted.sourceLead
+        ? Lead.updateOne(
+            { _id: deleted.sourceLead, projectManagement: deleted._id },
+            { $set: { projectManagement: null } }
+          )
+        : Promise.resolve(),
+      BudgetItem.deleteMany({ investment: deleted._id }),
+      Expense.deleteMany({ investment: deleted._id }),
+      ProjectTask.deleteMany({ investment: deleted._id }),
+    ]);
     res.json({ message: "Investment deleted" });
   } catch (err) {
     res.status(500).json({ error: "Failed to delete investment" });

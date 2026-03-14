@@ -18,6 +18,18 @@ router.get('/investment/:investmentId', budgetItemController.getBudgetItemsForIn
 // @desc    Update a specific budget item
 router.patch('/:id', budgetItemController.updateBudgetItem);
 
+// @route   POST /api/budget-items/:id/awards
+// @desc    Add a vendor commitment to a specific budget item
+router.post('/:id/awards', budgetItemController.addBudgetAward);
+
+// @route   PATCH /api/budget-items/:id/awards/:awardId
+// @desc    Update a vendor commitment on a specific budget item
+router.patch('/:id/awards/:awardId', budgetItemController.updateBudgetAward);
+
+// @route   DELETE /api/budget-items/:id/awards/:awardId
+// @desc    Delete a vendor commitment from a specific budget item
+router.delete('/:id/awards/:awardId', budgetItemController.deleteBudgetAward);
+
 // @route   DELETE /api/budget-items/:id
 // @desc    Delete a specific budget item
 router.delete('/:id', budgetItemController.deleteBudgetItem);

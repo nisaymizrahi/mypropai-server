@@ -212,8 +212,8 @@ const buildWorkspaces = (group) => {
           status: primaryInvestment.status,
           strategy: investmentStrategy,
           strategyLabel: getPropertyStrategyLabel(investmentStrategy),
-          label: 'Acquisitions',
-          path: `/investments/${primaryInvestment._id}`,
+          label: 'Project Management',
+          path: `/project-management/${primaryInvestment._id}`,
         }
       : null,
     management: primaryManagedProperty

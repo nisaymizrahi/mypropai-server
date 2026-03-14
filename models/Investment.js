@@ -13,6 +13,16 @@ const investmentSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    sourceLead: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Lead",
+      default: null,
+      index: true,
+    },
+    sourceLeadSnapshot: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
 
     // Core Info
     address: { type: String, required: true },

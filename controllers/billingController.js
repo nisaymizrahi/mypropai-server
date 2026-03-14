@@ -336,7 +336,7 @@ exports.getResourceAccess = async (req, res) => {
       return res.status(400).json({ msg: 'Unsupported billing access check.' });
     }
 
-    if (rule.oneTimeProductKey) {
+    if (rule.oneTimeProductKey && resourceId) {
       const target = await resolvePurchaseTarget(req.user.id, rule.oneTimeProductKey, resourceId);
       if (target.status) {
         return res.status(target.status).json({ msg: target.message });

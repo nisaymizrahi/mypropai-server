@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
 const ExpenseSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true,
+  },
   // Links this expense back to the main investment project.
   investment: {
     type: mongoose.Schema.Types.ObjectId,
@@ -11,11 +17,21 @@ const ExpenseSchema = new mongoose.Schema({
   budgetItem: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'BudgetItem',
-    required: true,
+    default: null,
+  },
+  awardId: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  title: {
+    type: String,
+    required: [true, 'Please provide a title for the expense.'],
+    trim: true,
   },
   description: {
     type: String,
-    required: [true, 'Please provide a description for the expense.'],
+    default: '',
     trim: true,
   },
   amount: {
@@ -27,9 +43,19 @@ const ExpenseSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Vendor',
   },
+  payeeName: {
+    type: String,
+    trim: true,
+    default: '',
+  },
   date: {
     type: Date,
     default: Date.now,
+  },
+  entryMethod: {
+    type: String,
+    enum: ['manual', 'receipt_ai'],
+    default: 'manual',
   },
   notes: {
     type: String,
@@ -40,6 +66,10 @@ const ExpenseSchema = new mongoose.Schema({
   },
   receiptCloudinaryId: {
     type: String,
+  },
+  receiptExtraction: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
   },
 }, { timestamps: true });
 

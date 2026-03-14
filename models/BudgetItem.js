@@ -1,6 +1,49 @@
 const mongoose = require('mongoose');
 const { nanoid } = require('nanoid');
 
+const BudgetAwardSchema = new mongoose.Schema(
+  {
+    awardId: {
+      type: String,
+      default: () => nanoid(10),
+    },
+    vendor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Vendor',
+      default: null,
+    },
+    vendorName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    description: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    amount: {
+      type: Number,
+      default: 0,
+    },
+    notes: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    sourceBid: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Bid',
+      default: null,
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
 const BudgetItemSchema = new mongoose.Schema({
   // A unique, human-readable ID for this item.
   itemId: {
@@ -13,6 +56,17 @@ const BudgetItemSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Investment',
     required: true,
+  },
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true,
+  },
+  sourceRenovationItemId: {
+    type: String,
+    trim: true,
+    default: '',
   },
   category: {
     type: String,
@@ -29,6 +83,10 @@ const BudgetItemSchema = new mongoose.Schema({
     required: [true, 'Please provide a budget amount.'],
     default: 0,
   },
+  originalBudgetAmount: {
+    type: Number,
+    default: 0,
+  },
   status: {
     type: String,
     enum: ['Not Started', 'In Progress', 'Awaiting Materials', 'Complete', 'On Hold'],
@@ -37,6 +95,7 @@ const BudgetItemSchema = new mongoose.Schema({
   dueDate: {
     type: Date,
   },
+  awards: [BudgetAwardSchema],
 }, { timestamps: true });
 
 module.exports = mongoose.model('BudgetItem', BudgetItemSchema);
