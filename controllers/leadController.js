@@ -7,6 +7,10 @@ const {
   getLeadPropertyPreview,
   numberOrNull,
 } = require('../utils/leadPropertyService');
+const {
+  buildCompsAnalysis: buildSharedCompsAnalysis,
+  generateAiReport: generateSharedAiReport,
+} = require('../utils/compsAnalysisService');
 const { consumeMatchingPurchase, getFeatureAccessState, recordFeatureUsage } = require('../utils/billingAccess');
 const { upsertCanonicalProperty } = require('../utils/propertyRecordService');
 
@@ -976,106 +980,18 @@ exports.analyzeComps = async (req, res) => {
     analysisStep = 'refreshing property preview';
     const preview = await getLeadPropertyPreview(buildPublicLeadSnapshot(lead)).catch(() => null);
     const subject = mergeLeadWithPreview(buildPublicLeadSnapshot(lead), preview || {});
-    const requestedRadius = clamp(numberOrNull(radius) ?? 1, 0.25, 10);
-    const requestedSaleDateMonths = clamp(numberOrNull(saleDateMonths) ?? 6, 1, 60);
-    const requestedMaxComps = clamp(numberOrNull(maxComps) ?? 8, 5, 12);
-    const requestedPropertyType = String(requestedPropertyTypeRaw || '').trim();
-    const squareFootageInputs = [
-      numberOrNull(minSquareFootage),
-      numberOrNull(maxSquareFootage),
-    ];
-    const lotSizeInputs = [numberOrNull(minLotSize), numberOrNull(maxLotSize)];
-    const requestedMinSquareFootage =
-      squareFootageInputs[0] !== null && squareFootageInputs[1] !== null
-        ? Math.min(squareFootageInputs[0], squareFootageInputs[1])
-        : squareFootageInputs[0];
-    const requestedMaxSquareFootage =
-      squareFootageInputs[0] !== null && squareFootageInputs[1] !== null
-        ? Math.max(squareFootageInputs[0], squareFootageInputs[1])
-        : squareFootageInputs[1];
-    const requestedMinLotSize =
-      lotSizeInputs[0] !== null && lotSizeInputs[1] !== null
-        ? Math.min(lotSizeInputs[0], lotSizeInputs[1])
-        : lotSizeInputs[0];
-    const requestedMaxLotSize =
-      lotSizeInputs[0] !== null && lotSizeInputs[1] !== null
-        ? Math.max(lotSizeInputs[0], lotSizeInputs[1])
-        : lotSizeInputs[1];
-    const analysisFilters = {
-      radius: requestedRadius,
-      saleDateMonths: requestedSaleDateMonths,
-      maxComps: requestedMaxComps,
-      propertyType: requestedPropertyType,
-      minSquareFootage: requestedMinSquareFootage,
-      maxSquareFootage: requestedMaxSquareFootage,
-      minLotSize: requestedMinLotSize,
-      maxLotSize: requestedMaxLotSize,
-    };
-    const activePropertyTypeFilter =
-      requestedPropertyType || derivePropertyTypeFilter(subject.propertyType, subject.unitCount);
-
-    analysisStep = 'fetching AVM comparables';
-    const avmValue = await fetchRentCastValueEstimate({
-      ...subject,
-      compCount: requestedMaxComps,
-    }).catch((error) => {
-      console.error('RentCast AVM lookup failed:', error.response?.data || error.message);
-      return null;
+    const compsAnalysis = await buildSharedCompsAnalysis(subject, {
+      radius,
+      saleDateMonths,
+      maxComps,
+      propertyType: requestedPropertyTypeRaw,
+      minSquareFootage,
+      maxSquareFootage,
+      minLotSize,
+      maxLotSize,
     });
 
-    analysisStep = 'filtering comparable properties';
-    const compCutoff = new Date();
-    compCutoff.setMonth(compCutoff.getMonth() - requestedSaleDateMonths);
-
-    const marketComps = (Array.isArray(avmValue?.comparables) ? avmValue.comparables : [])
-      .filter((comp) => comp && typeof comp === 'object' && !Array.isArray(comp))
-      .map((comp) => {
-        const saleDate = toValidDateOrNull(
-          comp.lastSaleDate ||
-            comp.saleDate ||
-            comp.listedDate ||
-            comp.lastSeenDate ||
-            comp.removedDate ||
-            null
-        );
-
-        return {
-          address:
-            comp.formattedAddress ||
-            [comp.addressLine1, comp.addressLine2, comp.city, comp.state, comp.zipCode]
-              .filter(Boolean)
-              .join(', '),
-          propertyType: comp.propertyType,
-          unitCount: resolveComparableUnitCount(comp),
-          salePrice: numberOrNull(comp.price),
-          saleDate,
-          distance: numberOrNull(comp.distance),
-          bedrooms: numberOrNull(comp.bedrooms),
-          bathrooms: numberOrNull(comp.bathrooms),
-          squareFootage: numberOrNull(comp.squareFootage),
-          lotSize: numberOrNull(comp.lotSize),
-          yearBuilt: numberOrNull(comp.yearBuilt),
-          pricePerSqft: comp.price && comp.squareFootage ? comp.price / comp.squareFootage : null,
-        };
-      })
-      .filter((comp) => {
-        if (!comp.salePrice) return false;
-        if (!comp.saleDate) return true;
-        return comp.saleDate >= compCutoff;
-      })
-      .filter(
-        (comp) =>
-          (comp.distance === null || comp.distance === undefined || comp.distance <= requestedRadius) &&
-          matchesPropertyTypeFilter(requestedPropertyType, comp.propertyType, comp.unitCount) &&
-          matchesNumericRange(
-            comp.squareFootage,
-            requestedMinSquareFootage,
-            requestedMaxSquareFootage
-          ) &&
-          matchesNumericRange(comp.lotSize, requestedMinLotSize, requestedMaxLotSize)
-      );
-
-    if (!marketComps.length) {
+    if (compsAnalysis.noResults) {
       return res.status(200).json({
         noResults: true,
         msg: 'No comparable properties matched the selected filters. Try widening the radius or relaxing the size filters.',
@@ -1083,80 +999,25 @@ exports.analyzeComps = async (req, res) => {
         summary: null,
         comps: [],
         ai: null,
-        filters: analysisFilters,
+        filters: compsAnalysis.analysisFilters,
+        valuationContext: compsAnalysis.valuationContext,
         generatedAt: null,
       });
     }
 
-    analysisStep = 'ranking comparable properties';
-    const rankedComps = marketComps
-      .map((comp) => ({
-        ...comp,
-        relevanceScore: scoreComparable(subject, comp, activePropertyTypeFilter),
-      }))
-      .sort((a, b) => a.relevanceScore - b.relevanceScore)
-      .slice(0, requestedMaxComps)
-      .map(({ relevanceScore, ...comp }) => comp);
-
-    analysisStep = 'summarizing comparable properties';
-    const summary = summarizeComps(subject, rankedComps, avmValue);
-
     analysisStep = 'generating AI report';
-    const aiReport = await generateAiReport(
+    const aiReport = await generateSharedAiReport(
       subject,
-      summary,
-      rankedComps,
-      avmValue,
-      analysisFilters
+      compsAnalysis.summary,
+      compsAnalysis.rankedComps,
+      compsAnalysis.valuationContext,
+      compsAnalysis.analysisFilters
     ).catch((error) => {
       console.error('Lead AI report generation failed:', error.response?.data || error.message);
       return null;
     });
 
-    analysisStep = 'saving comps analysis to lead';
     const generatedAt = new Date();
-    const nextCompsAnalysis = {
-      generatedAt,
-      filters: analysisFilters,
-      estimatedValue: summary.estimatedValue,
-      estimatedValueLow: summary.estimatedValueLow,
-      estimatedValueHigh: summary.estimatedValueHigh,
-      averageSoldPrice: summary.averageSoldPrice,
-      medianSoldPrice: summary.medianSoldPrice,
-      averagePricePerSqft: summary.averagePricePerSqft,
-      medianPricePerSqft: summary.medianPricePerSqft,
-      saleCompCount: summary.saleCompCount,
-      askingPriceDelta: summary.askingPriceDelta,
-      recommendedOfferLow: summary.recommendedOfferLow,
-      recommendedOfferHigh: summary.recommendedOfferHigh,
-      report: aiReport || undefined,
-      recentComps: rankedComps.map((comp) => ({
-        address: comp.address,
-        propertyType: comp.propertyType,
-        salePrice: comp.salePrice,
-        saleDate: comp.saleDate,
-        pricePerSqft: comp.pricePerSqft ? Math.round(comp.pricePerSqft) : null,
-        distance: comp.distance,
-        bedrooms: comp.bedrooms,
-        bathrooms: comp.bathrooms,
-        squareFootage: comp.squareFootage,
-        lotSize: comp.lotSize,
-        unitCount: comp.unitCount,
-        yearBuilt: comp.yearBuilt,
-      })),
-    };
-
-    await Lead.updateOne(
-      {
-        _id: lead._id,
-        user: req.user.id,
-      },
-      {
-        $set: {
-          compsAnalysis: nextCompsAnalysis,
-        },
-      }
-    );
 
     if (access.accessSource === 'subscription_included') {
       analysisStep = 'recording feature usage';
@@ -1168,14 +1029,7 @@ exports.analyzeComps = async (req, res) => {
           resourceId: lead._id,
           source: 'subscription_included',
           metadata: {
-            maxComps: requestedMaxComps,
-            radius: requestedRadius,
-            saleDateMonths: requestedSaleDateMonths,
-            propertyType: requestedPropertyType,
-            minSquareFootage: requestedMinSquareFootage,
-            maxSquareFootage: requestedMaxSquareFootage,
-            minLotSize: requestedMinLotSize,
-            maxLotSize: requestedMaxLotSize,
+            ...compsAnalysis.analysisFilters,
           },
         });
       } catch (usageError) {
@@ -1205,10 +1059,11 @@ exports.analyzeComps = async (req, res) => {
     analysisStep = 'returning response';
     res.status(200).json({
       subject,
-      summary,
-      comps: rankedComps,
+      summary: compsAnalysis.summary,
+      comps: compsAnalysis.rankedComps,
       ai: aiReport,
-      filters: analysisFilters,
+      filters: compsAnalysis.analysisFilters,
+      valuationContext: compsAnalysis.valuationContext,
       generatedAt,
     });
   } catch (error) {

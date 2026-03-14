@@ -10,6 +10,10 @@ const {
   getLeadPropertyPreview,
   numberOrNull,
 } = require("../utils/leadPropertyService");
+const {
+  buildCompsAnalysis: buildSharedCompsAnalysis,
+  generateAiReport: generateSharedAiReport,
+} = require("../utils/compsAnalysisService");
 const { getFeatureAccessState, recordFeatureUsage } = require("../utils/billingAccess");
 
 const router = express.Router();
@@ -325,8 +329,10 @@ const pickFirst = (...values) =>
 
 const toArray = (value) => (Array.isArray(value) ? value : []);
 
-const buildFullAddress = (parts = {}) =>
-  [
+const buildFullAddress = (parts = {}) => {
+  if (parts.formattedAddress) return parts.formattedAddress;
+
+  return [
     pickFirst(parts.addressLine1, parts.mailingAddressLine1),
     pickFirst(parts.addressLine2, parts.mailingAddressLine2),
     parts.city,
@@ -335,6 +341,14 @@ const buildFullAddress = (parts = {}) =>
   ]
     .filter(Boolean)
     .join(", ");
+};
+
+const stringifyAddress = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value !== "object" || Array.isArray(value)) return "";
+  return buildFullAddress(value);
+};
 
 const normalizeOwnerSummary = (property = {}) => {
   const owner = property?.owner || {};
@@ -351,7 +365,8 @@ const normalizeOwnerSummary = (property = {}) => {
     type: pickFirst(owner?.type, property?.ownerType) || "",
     mailingAddress:
       pickFirst(
-        owner?.mailingAddress,
+        typeof owner?.mailingAddress === "string" ? owner.mailingAddress : "",
+        stringifyAddress(owner?.mailingAddress),
         buildFullAddress(owner),
         buildFullAddress(property?.owner || {})
       ) || "",
@@ -833,7 +848,9 @@ const buildCompsAnalysis = async (subject, rawFilters = {}) => {
 
   const avmValue = await fetchRentCastValueEstimate({
     ...subject,
-    compCount: requestedMaxComps,
+    compCount: Math.max(requestedMaxComps, 20),
+    maxRadius: requestedRadius,
+    daysOld: Math.max(1, Math.round(requestedSaleDateMonths * 30)),
   }).catch((error) => {
     console.error("RentCast AVM lookup failed:", error.response?.data || error.message);
     return null;
@@ -910,7 +927,8 @@ router.get("/", async (req, res) => {
     const avm = await fetchRentCastValueEstimate({
       ...subject,
       address: subject.address || address,
-      compCount: 12,
+      compCount: 20,
+      maxRadius: radius,
     });
 
     let comps = Array.isArray(avm?.comparables) ? avm.comparables.map(normalizeComparable) : [];
@@ -961,7 +979,7 @@ router.post("/report", async (req, res) => {
 
     const preview = await getLeadPropertyPreview(subjectInput).catch(() => null);
     const subject = mergeSubjectWithPreview(subjectInput, preview || {});
-    const compsAnalysis = await buildCompsAnalysis(subject, rawFilters);
+    const compsAnalysis = await buildSharedCompsAnalysis(subject, rawFilters);
 
     if (compsAnalysis.noResults) {
       return res.status(200).json({
@@ -972,15 +990,16 @@ router.post("/report", async (req, res) => {
         comps: [],
         ai: null,
         filters: compsAnalysis.analysisFilters,
+        valuationContext: compsAnalysis.valuationContext,
         generatedAt: null,
       });
     }
 
-    const aiReport = await generateAiReport(
+    const aiReport = await generateSharedAiReport(
       subject,
       compsAnalysis.summary,
       compsAnalysis.rankedComps,
-      compsAnalysis.avmValue,
+      compsAnalysis.valuationContext,
       compsAnalysis.analysisFilters
     ).catch((error) => {
       console.error("Standalone AI report generation failed:", error.response?.data || error.message);
@@ -1007,6 +1026,7 @@ router.post("/report", async (req, res) => {
       comps: compsAnalysis.rankedComps,
       ai: aiReport,
       filters: compsAnalysis.analysisFilters,
+      valuationContext: compsAnalysis.valuationContext,
       generatedAt: new Date(),
     });
   } catch (error) {
@@ -1055,10 +1075,12 @@ router.post("/report/full", async (req, res) => {
     const preview = formatPropertyPreview(subjectInput, propertyRecord, saleListingRecord);
     const subject = mergeSubjectWithPreview(subjectInput, preview || {});
 
-    const compsAnalysis = await buildCompsAnalysis(subject, rawFilters);
+    const compsAnalysis = await buildSharedCompsAnalysis(subject, rawFilters);
     const rentEstimateRecord = await fetchRentCastRentEstimate({
       ...subject,
-      compCount: compsAnalysis.analysisFilters.maxComps,
+      compCount: Math.max(compsAnalysis.analysisFilters.maxComps, 20),
+      maxRadius: compsAnalysis.analysisFilters.radius,
+      daysOld: Math.max(1, Math.round(compsAnalysis.analysisFilters.saleDateMonths * 30)),
     }).catch((error) => {
       console.error("RentCast rent estimate lookup failed:", error.response?.data || error.message);
       return null;
@@ -1068,7 +1090,7 @@ router.post("/report/full", async (req, res) => {
     const owner = normalizeOwnerSummary(propertyRecord || {});
     const saleListing = normalizeListingSummary(saleListingRecord);
     const rentalListing = normalizeListingSummary(rentalListingRecord);
-    const value = normalizeValueSummary(compsAnalysis.avmValue);
+    const value = normalizeValueSummary(compsAnalysis.valuationContext);
     const rent = normalizeRentSummary(rentEstimateRecord);
     const features = buildFeatureEntries(propertyRecord || {});
 

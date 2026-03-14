@@ -87,16 +87,22 @@ const fetchRentCastRentalListing = async (input) => {
 const fetchRentCastValueEstimate = async (input) => {
   const params = {
     address: buildFormattedAddress(input),
-    compCount: Math.min(Math.max(numberOrNull(input.compCount) || 8, 5), 12),
+    compCount: Math.min(Math.max(numberOrNull(input.compCount) || 8, 5), 25),
   };
 
+  const propertyType = input.propertyType ? String(input.propertyType).trim() : '';
   const bedrooms = numberOrNull(input.bedrooms);
   const bathrooms = numberOrNull(input.bathrooms);
   const squareFootage = numberOrNull(input.squareFootage);
+  const maxRadius = numberOrNull(input.maxRadius);
+  const daysOld = numberOrNull(input.daysOld);
 
+  if (propertyType) params.propertyType = propertyType;
   if (bedrooms) params.bedrooms = bedrooms;
   if (bathrooms) params.bathrooms = bathrooms;
   if (squareFootage) params.squareFootage = squareFootage;
+  if (maxRadius) params.maxRadius = maxRadius;
+  if (daysOld) params.daysOld = Math.max(1, Math.round(daysOld));
 
   return requestRentCast('/avm/value', params);
 };
@@ -104,18 +110,22 @@ const fetchRentCastValueEstimate = async (input) => {
 const fetchRentCastRentEstimate = async (input) => {
   const params = {
     address: buildFormattedAddress(input),
-    compCount: Math.min(Math.max(numberOrNull(input.compCount) || 8, 5), 12),
+    compCount: Math.min(Math.max(numberOrNull(input.compCount) || 8, 5), 25),
   };
 
   const propertyType = input.propertyType ? String(input.propertyType).trim() : '';
   const bedrooms = numberOrNull(input.bedrooms);
   const bathrooms = numberOrNull(input.bathrooms);
   const squareFootage = numberOrNull(input.squareFootage);
+  const maxRadius = numberOrNull(input.maxRadius);
+  const daysOld = numberOrNull(input.daysOld);
 
   if (propertyType) params.propertyType = propertyType;
   if (bedrooms) params.bedrooms = bedrooms;
   if (bathrooms) params.bathrooms = bathrooms;
   if (squareFootage) params.squareFootage = squareFootage;
+  if (maxRadius) params.maxRadius = maxRadius;
+  if (daysOld) params.daysOld = Math.max(1, Math.round(daysOld));
 
   return requestRentCast('/avm/rent/long-term', params);
 };
