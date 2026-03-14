@@ -9,6 +9,7 @@ const {
 } = require('../utils/leadPropertyService');
 const {
   buildCompsAnalysis: buildSharedCompsAnalysis,
+  buildLegacyCompsAnalysisSnapshot,
   generateAiReport: generateSharedAiReport,
 } = require('../utils/compsAnalysisService');
 const { consumeMatchingPurchase, getFeatureAccessState, recordFeatureUsage } = require('../utils/billingAccess');
@@ -1018,6 +1019,26 @@ exports.analyzeComps = async (req, res) => {
     });
 
     const generatedAt = new Date();
+
+    analysisStep = 'saving comps analysis to lead';
+    await Lead.updateOne(
+      {
+        _id: lead._id,
+        user: req.user.id,
+      },
+      {
+        $set: {
+          compsAnalysis: buildLegacyCompsAnalysisSnapshot({
+            generatedAt,
+            filters: compsAnalysis.analysisFilters,
+            valuationContext: compsAnalysis.valuationContext,
+            summary: compsAnalysis.summary,
+            aiReport,
+            comps: compsAnalysis.rankedComps,
+          }),
+        },
+      }
+    );
 
     if (access.accessSource === 'subscription_included') {
       analysisStep = 'recording feature usage';
