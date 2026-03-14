@@ -207,7 +207,15 @@ const median = (values) => {
 
 const roundCurrency = (value) => {
   if (value === null || value === undefined) return null;
-  return Math.round(value / 1000) * 1000;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round(parsed / 1000) * 1000;
+};
+
+const toValidDateOrNull = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.valueOf()) ? parsed : null;
 };
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
@@ -941,35 +949,39 @@ exports.analyzeComps = async (req, res) => {
 
     const marketComps = (Array.isArray(avmValue?.comparables) ? avmValue.comparables : [])
       .filter((comp) => comp && typeof comp === 'object' && !Array.isArray(comp))
-      .map((comp) => ({
-        address:
-          comp.formattedAddress ||
-          [comp.addressLine1, comp.addressLine2, comp.city, comp.state, comp.zipCode]
-            .filter(Boolean)
-            .join(', '),
-        propertyType: comp.propertyType,
-        unitCount: resolveComparableUnitCount(comp),
-        salePrice: numberOrNull(comp.price),
-        saleDate:
+      .map((comp) => {
+        const saleDate = toValidDateOrNull(
           comp.lastSaleDate ||
-          comp.saleDate ||
-          comp.listedDate ||
-          comp.lastSeenDate ||
-          comp.removedDate ||
-          null,
-        distance: numberOrNull(comp.distance),
-        bedrooms: numberOrNull(comp.bedrooms),
-        bathrooms: numberOrNull(comp.bathrooms),
-        squareFootage: numberOrNull(comp.squareFootage),
-        lotSize: numberOrNull(comp.lotSize),
-        yearBuilt: numberOrNull(comp.yearBuilt),
-        pricePerSqft: comp.price && comp.squareFootage ? comp.price / comp.squareFootage : null,
-      }))
+            comp.saleDate ||
+            comp.listedDate ||
+            comp.lastSeenDate ||
+            comp.removedDate ||
+            null
+        );
+
+        return {
+          address:
+            comp.formattedAddress ||
+            [comp.addressLine1, comp.addressLine2, comp.city, comp.state, comp.zipCode]
+              .filter(Boolean)
+              .join(', '),
+          propertyType: comp.propertyType,
+          unitCount: resolveComparableUnitCount(comp),
+          salePrice: numberOrNull(comp.price),
+          saleDate,
+          distance: numberOrNull(comp.distance),
+          bedrooms: numberOrNull(comp.bedrooms),
+          bathrooms: numberOrNull(comp.bathrooms),
+          squareFootage: numberOrNull(comp.squareFootage),
+          lotSize: numberOrNull(comp.lotSize),
+          yearBuilt: numberOrNull(comp.yearBuilt),
+          pricePerSqft: comp.price && comp.squareFootage ? comp.price / comp.squareFootage : null,
+        };
+      })
       .filter((comp) => {
         if (!comp.salePrice) return false;
         if (!comp.saleDate) return true;
-        const compDate = new Date(comp.saleDate);
-        return Number.isFinite(compDate.valueOf()) ? compDate >= compCutoff : true;
+        return comp.saleDate >= compCutoff;
       })
       .filter(
         (comp) =>
