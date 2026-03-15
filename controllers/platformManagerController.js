@@ -17,12 +17,14 @@ const Tenant = require('../models/Tenant');
 const User = require('../models/User');
 const Vendor = require('../models/Vendor');
 const { FEATURE_RULES } = require('../config/billingCatalog');
+const sendEmail = require('../utils/sendEmail');
 const {
   getCurrentMonthWindow,
   getEffectiveSubscriptionState,
   getPlatformOverrideState,
 } = require('../utils/billingAccess');
 const { createAuthSessionToken } = require('../utils/authSessionService');
+const { issuePasswordResetForUser } = require('./authController');
 const { getStripeClient } = require('../lib/stripe');
 const { normalizeEmail } = require('../utils/platformAccess');
 
@@ -31,6 +33,7 @@ const IMPERSONATION_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const BILLING_ISSUE_STATUSES = new Set(['past_due', 'unpaid', 'incomplete']);
 const SUBSCRIPTION_DEACTIVATED_STATUSES = new Set(['canceled', 'incomplete_expired', 'unpaid']);
+const HIGH_USAGE_THRESHOLD = 10;
 
 const USER_RELATED_MODELS = [
   { key: 'leads', model: Lead },
@@ -85,6 +88,15 @@ const summarizeUserAgent = (userAgent = '') => {
   if (normalized.includes('Firefox')) return 'Firefox';
   if (normalized.includes('Edg')) return 'Edge';
   return normalized.slice(0, 80);
+};
+
+const buildStripeDashboardUrl = (resource, resourceId, livemode = false) => {
+  if (!resourceId) {
+    return null;
+  }
+
+  const base = livemode ? 'https://dashboard.stripe.com' : 'https://dashboard.stripe.com/test';
+  return `${base}/${resource}/${resourceId}`;
 };
 
 const buildUserCounts = async (userId) => {
@@ -164,9 +176,39 @@ const buildLatestSessionLookup = async (userIds) => {
   return map;
 };
 
+const buildUsageLookup = async (userIds) => {
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return new Map();
+  }
+
+  const objectIds = userIds.map((id) => toObjectId(id));
+  const { periodStart, nextPeriodStart } = getCurrentMonthWindow();
+
+  const entries = await FeatureUsage.aggregate([
+    {
+      $match: {
+        user: { $in: objectIds },
+        occurredAt: {
+          $gte: periodStart,
+          $lt: nextPeriodStart,
+        },
+      },
+    },
+    {
+      $group: {
+        _id: '$user',
+        monthlyUsageCount: { $sum: 1 },
+      },
+    },
+  ]);
+
+  return new Map(entries.map((entry) => [String(entry._id), entry.monthlyUsageCount || 0]));
+};
+
 const buildUserSummary = async (user, currentPlatformManagerId, context = {}) => {
   const counts = context.counts || (await buildUserCounts(user._id));
   const sessionMeta = context.sessionMeta || {};
+  const monthlyUsageCount = Number(context.monthlyUsageCount || 0);
   const overrideState = getPlatformOverrideState(user);
   const subscriptionState = getEffectiveSubscriptionState(user);
   const lastLoginAt = user.lastLoginAt || sessionMeta.lastSessionCreatedAt || null;
@@ -192,6 +234,8 @@ const buildUserSummary = async (user, currentPlatformManagerId, context = {}) =>
     isRecentSignup: isRecentDate(user.createdAt, 7 * 24 * 60 * 60 * 1000),
     isRecentlyActive: isRecentDate(lastLoginAt),
     hasBillingIssue,
+    monthlyUsageCount,
+    isHighUsage: monthlyUsageCount >= HIGH_USAGE_THRESHOLD,
     counts,
     subscription: {
       plan: subscriptionState.planKey,
@@ -303,6 +347,80 @@ const buildUsageSummary = async (userId) => {
   };
 };
 
+const fetchStripeBillingContext = async (user) => {
+  const stripe = getStripeClient();
+  if (!stripe || (!user?.stripeCustomerId && !user?.stripeSubscriptionId)) {
+    return {
+      subscription: null,
+      customer: null,
+      invoices: [],
+      links: {
+        customerDashboardUrl: null,
+        subscriptionDashboardUrl: null,
+      },
+    };
+  }
+
+  let customer = null;
+  let subscription = null;
+  let invoices = [];
+  let livemode = false;
+
+  try {
+    if (user.stripeCustomerId) {
+      customer = await stripe.customers.retrieve(user.stripeCustomerId);
+      livemode = Boolean(customer?.livemode);
+    }
+
+    if (user.stripeSubscriptionId) {
+      subscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+      livemode = Boolean(subscription?.livemode ?? livemode);
+    } else if (user.stripeCustomerId) {
+      const result = await stripe.subscriptions.list({
+        customer: user.stripeCustomerId,
+        status: 'all',
+        limit: 1,
+      });
+      subscription = result.data[0] || null;
+      livemode = Boolean(subscription?.livemode ?? livemode);
+    }
+
+    if (user.stripeCustomerId) {
+      const invoiceList = await stripe.invoices.list({
+        customer: user.stripeCustomerId,
+        limit: 8,
+      });
+      invoices = (invoiceList.data || []).map((invoice) => ({
+        id: invoice.id,
+        number: invoice.number || null,
+        status: invoice.status || null,
+        hostedInvoiceUrl: invoice.hosted_invoice_url || null,
+        invoicePdf: invoice.invoice_pdf || null,
+        amountDue: invoice.amount_due || 0,
+        amountPaid: invoice.amount_paid || 0,
+        currency: invoice.currency || 'usd',
+        createdAt: invoice.created ? new Date(invoice.created * 1000) : null,
+      }));
+    }
+  } catch (error) {
+    console.error('Platform manager Stripe detail fetch failed:', error);
+  }
+
+  return {
+    subscription,
+    customer,
+    invoices,
+    links: {
+      customerDashboardUrl: buildStripeDashboardUrl('customers', user.stripeCustomerId, livemode),
+      subscriptionDashboardUrl: buildStripeDashboardUrl(
+        'subscriptions',
+        user.stripeSubscriptionId || subscription?.id,
+        livemode
+      ),
+    },
+  };
+};
+
 const recordAuditLog = async ({ actorUser, targetUser, action, reason = null, metadata = {} }) => {
   try {
     return await PlatformAuditLog.create({
@@ -391,7 +509,7 @@ const syncStripeStateForUser = async (user) => {
 };
 
 const buildUserDetailPayload = async (targetUser, currentPlatformManagerId, currentSessionId = null) => {
-  const [counts, sessions, supportNotes, auditLogs, usage] = await Promise.all([
+  const [counts, sessions, supportNotes, auditLogs, usage, stripeContext] = await Promise.all([
     buildUserCounts(targetUser._id),
     AuthSession.find({ user: targetUser._id })
       .sort({ lastActivityAt: -1, createdAt: -1 })
@@ -399,6 +517,7 @@ const buildUserDetailPayload = async (targetUser, currentPlatformManagerId, curr
     PlatformSupportNote.find({ targetUser: targetUser._id }).sort({ createdAt: -1 }).limit(20),
     PlatformAuditLog.find({ targetUser: targetUser._id }).sort({ createdAt: -1 }).limit(30),
     buildUsageSummary(targetUser._id),
+    fetchStripeBillingContext(targetUser),
   ]);
 
   const activeSessions = sessions.filter(
@@ -412,6 +531,7 @@ const buildUserDetailPayload = async (targetUser, currentPlatformManagerId, curr
       lastSessionCreatedAt: sessions[0]?.createdAt || null,
       activeSessionCount: activeSessions.length,
     },
+    monthlyUsageCount: usage.lifetime.reduce((total, entry) => total + entry.currentMonthCount, 0),
   });
 
   return {
@@ -426,10 +546,17 @@ const buildUserDetailPayload = async (targetUser, currentPlatformManagerId, curr
       subscriptionSource: targetUser.subscriptionSource || 'none',
       subscriptionCurrentPeriodEnd: targetUser.subscriptionCurrentPeriodEnd || null,
       subscriptionLastSyncedAt: targetUser.subscriptionLastSyncedAt || null,
+      cancelAtPeriodEnd: Boolean(stripeContext.subscription?.cancel_at_period_end),
+      cancelAt: stripeContext.subscription?.cancel_at
+        ? new Date(stripeContext.subscription.cancel_at * 1000)
+        : null,
       hasBillingIssue:
         targetUser.subscriptionSource === 'stripe' &&
         BILLING_ISSUE_STATUSES.has(targetUser.subscriptionStatus || ''),
       canSync: Boolean(targetUser.stripeCustomerId || targetUser.stripeSubscriptionId),
+      customerDashboardUrl: stripeContext.links.customerDashboardUrl,
+      subscriptionDashboardUrl: stripeContext.links.subscriptionDashboardUrl,
+      invoices: stripeContext.invoices,
     },
     usage,
     sessions: sessions.map((session) => serializeSession(session, currentSessionId)),
@@ -453,12 +580,17 @@ exports.getUsers = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(100);
 
-    const sessionLookup = await buildLatestSessionLookup(users.map((user) => user._id));
+    const userIds = users.map((user) => user._id);
+    const [sessionLookup, usageLookup] = await Promise.all([
+      buildLatestSessionLookup(userIds),
+      buildUsageLookup(userIds),
+    ]);
 
     const summaries = await Promise.all(
       users.map((user) =>
         buildUserSummary(user, req.user.id, {
           sessionMeta: sessionLookup.get(String(user._id)),
+          monthlyUsageCount: usageLookup.get(String(user._id)) || 0,
         })
       )
     );
@@ -526,11 +658,16 @@ exports.exportUsers = async (req, res) => {
     }
 
     const users = await User.find(filter).sort({ createdAt: -1 }).limit(1000);
-    const sessionLookup = await buildLatestSessionLookup(users.map((user) => user._id));
+    const userIds = users.map((user) => user._id);
+    const [sessionLookup, usageLookup] = await Promise.all([
+      buildLatestSessionLookup(userIds),
+      buildUsageLookup(userIds),
+    ]);
     const summaries = await Promise.all(
       users.map((user) =>
         buildUserSummary(user, req.user.id, {
           sessionMeta: sessionLookup.get(String(user._id)),
+          monthlyUsageCount: usageLookup.get(String(user._id)) || 0,
         })
       )
     );
@@ -548,6 +685,7 @@ exports.exportUsers = async (req, res) => {
       'Joined',
       'Last Login',
       'Last Seen',
+      'Monthly Usage',
       'Leads',
       'Investments',
       'Managed Properties',
@@ -572,6 +710,7 @@ exports.exportUsers = async (req, res) => {
       user.createdAt || '',
       user.lastLoginAt || '',
       user.lastSeenAt || '',
+      user.monthlyUsageCount || 0,
       user.counts.leads,
       user.counts.investments,
       user.counts.managedProperties,
@@ -850,6 +989,103 @@ exports.syncUserBilling = async (req, res) => {
   } catch (error) {
     console.error('Platform manager sync billing error:', error);
     return res.status(error.status || 500).json({ msg: error.message || 'Failed to sync billing.' });
+  }
+};
+
+exports.sendPasswordReset = async (req, res) => {
+  try {
+    const targetUser = await requireActionableUser(req, res);
+    if (!targetUser) {
+      return;
+    }
+
+    const userForReset = await User.findById(targetUser._id).select(
+      '+passwordResetTokenHash +passwordResetExpiresAt'
+    );
+    const reset = await issuePasswordResetForUser(userForReset);
+    const reason = String(req.body.reason || '').trim();
+
+    if (process.env.SENDGRID_API_KEY && process.env.EMAIL_FROM) {
+      await sendEmail({
+        to: userForReset.email,
+        subject: 'Reset your Fliprop password',
+        html: `
+          <p>Hello ${userForReset.name || 'there'},</p>
+          <p>A Fliprop platform manager prepared a password reset for your account.</p>
+          <p>This link expires in 1 hour: <a href="${reset.url}">${reset.url}</a></p>
+        `,
+      });
+    }
+
+    await recordAuditLog({
+      actorUser: req.user,
+      targetUser: userForReset,
+      action: 'password_reset_sent',
+      reason: reason || null,
+      metadata: {
+        emailDelivered: Boolean(process.env.SENDGRID_API_KEY && process.env.EMAIL_FROM),
+      },
+    });
+
+    return res.json({
+      message: process.env.SENDGRID_API_KEY && process.env.EMAIL_FROM
+        ? 'Password reset email sent.'
+        : 'Password reset link generated.',
+      resetUrl: reset.url,
+      expiresAt: reset.expiresAt,
+      deliveredByEmail: Boolean(process.env.SENDGRID_API_KEY && process.env.EMAIL_FROM),
+    });
+  } catch (error) {
+    console.error('Platform manager send password reset error:', error);
+    return res.status(500).json({ msg: 'Failed to create a password reset.' });
+  }
+};
+
+exports.updateUserEmail = async (req, res) => {
+  try {
+    const targetUser = await requireActionableUser(req, res);
+    if (!targetUser) {
+      return;
+    }
+
+    const nextEmail = normalizeEmail(req.body.email || '');
+    if (!nextEmail) {
+      return res.status(400).json({ msg: 'A valid email is required.' });
+    }
+
+    const existing = await User.findOne({
+      email: nextEmail,
+      _id: { $ne: targetUser._id },
+    });
+
+    if (existing) {
+      return res.status(409).json({ msg: 'That email is already in use by another account.' });
+    }
+
+    const previousEmail = targetUser.email;
+    const reason = String(req.body.reason || '').trim();
+
+    targetUser.email = nextEmail;
+    await targetUser.save();
+
+    await recordAuditLog({
+      actorUser: req.user,
+      targetUser,
+      action: 'email_changed',
+      reason: reason || null,
+      metadata: {
+        previousEmail,
+        nextEmail,
+      },
+    });
+
+    return res.json({
+      message: 'User email updated.',
+      user: await buildUserSummary(targetUser, req.user.id),
+    });
+  } catch (error) {
+    console.error('Platform manager update email error:', error);
+    return res.status(500).json({ msg: 'Failed to update user email.' });
   }
 };
 

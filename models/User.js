@@ -77,6 +77,16 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    passwordResetTokenHash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    passwordResetExpiresAt: {
+      type: Date,
+      default: null,
+      select: false,
+    },
     accountStatus: {
       type: String,
       enum: ['active', 'suspended'],

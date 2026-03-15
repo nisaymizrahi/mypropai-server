@@ -11,6 +11,9 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 router.post("/signup", authController.signup);
 router.post("/login", authController.login);
 router.post("/logout", requireAuth, authController.logout);
+router.post("/forgot-password", authController.requestPasswordReset);
+router.get("/reset-password/validate", authController.validatePasswordResetToken);
+router.post("/reset-password", authController.resetPasswordWithToken);
 
 // --- Google OAuth ---
 router.get(
