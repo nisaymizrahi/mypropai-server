@@ -38,6 +38,9 @@ router.get(
         return res.redirect(`${FRONTEND_URL}/login?error=suspended`);
       }
 
+      req.user.lastLoginAt = new Date();
+      await req.user.save();
+
       const { token } = await createAuthSessionToken({
         user: req.user,
         req,

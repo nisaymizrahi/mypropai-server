@@ -4,15 +4,36 @@ const { FEATURE_RULES, ONE_TIME_PRODUCTS, SUBSCRIPTION_PLANS } = require('../con
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing']);
 
+const getPlatformOverrideState = (user, now = new Date()) => {
+  const storedPlan = user?.platformSubscriptionOverride || 'none';
+  const expiresAt = user?.platformSubscriptionOverrideExpiresAt
+    ? new Date(user.platformSubscriptionOverrideExpiresAt)
+    : null;
+  const hasExpiry = expiresAt && Number.isFinite(expiresAt.valueOf());
+  const isExpired = Boolean(hasExpiry && expiresAt <= now);
+  const planKey = isExpired ? 'none' : storedPlan;
+
+  return {
+    planKey,
+    storedPlan,
+    expiresAt: hasExpiry ? expiresAt : null,
+    isExpired,
+    reason: user?.platformSubscriptionOverrideReason || null,
+    appliedAt: user?.platformSubscriptionOverrideAt || null,
+    appliedBy: user?.platformSubscriptionOverrideBy || null,
+  };
+};
+
 const getEffectiveSubscriptionState = (user) => {
-  const override = user?.platformSubscriptionOverride || 'none';
+  const overrideState = getPlatformOverrideState(user);
+  const override = overrideState.planKey;
 
   if (override === 'pro') {
     return {
       planKey: 'pro',
       status: 'active',
       isActive: true,
-      renewsAt: null,
+      renewsAt: overrideState.expiresAt || null,
       source: 'platform_override',
       isOverride: true,
       overridePlan: 'pro',
@@ -24,7 +45,7 @@ const getEffectiveSubscriptionState = (user) => {
       planKey: 'free',
       status: 'inactive',
       isActive: false,
-      renewsAt: null,
+      renewsAt: overrideState.expiresAt || null,
       source: 'platform_override',
       isOverride: true,
       overridePlan: 'free',
@@ -238,6 +259,7 @@ module.exports = {
   consumeMatchingPurchase,
   getCurrentMonthWindow,
   getEffectiveSubscriptionState,
+  getPlatformOverrideState,
   getIncludedUsageCountForCurrentMonth,
   getCurrentPlan,
   getFeatureAccessState,

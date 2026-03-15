@@ -26,6 +26,8 @@ const modelModules = [
   './models/Application',
   './models/Purchase',
   './models/PropertyReport',
+  './models/PlatformAuditLog',
+  './models/PlatformSupportNote',
 ];
 
 const routeModules = [

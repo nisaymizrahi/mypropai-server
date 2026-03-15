@@ -7,10 +7,12 @@ const {
   AUTH_ABSOLUTE_TIMEOUT_HOURS,
   AUTH_IDLE_TIMEOUT_MINUTES,
 } = require('../utils/authSessionPolicy');
+const { getPlatformOverrideState } = require('../utils/billingAccess');
 
 const buildAuthUser = (user, options = {}) => {
   const impersonation = options.impersonation || { active: false };
   const subscriptionState = getEffectiveSubscriptionState(user);
+  const overrideState = getPlatformOverrideState(user);
 
   return {
     id: user._id,
@@ -27,7 +29,9 @@ const buildAuthUser = (user, options = {}) => {
     subscriptionStatus: subscriptionState.status,
     subscriptionCurrentPeriodEnd: subscriptionState.renewsAt,
     subscriptionSource: subscriptionState.source,
-    subscriptionOverride: user.platformSubscriptionOverride || 'none',
+    subscriptionOverride: overrideState.planKey,
+    subscriptionOverrideExpiresAt: overrideState.expiresAt,
+    subscriptionOverrideReason: overrideState.reason,
     isPlatformManager: isPlatformManager(user) && !impersonation.active,
     impersonation,
   };
@@ -60,6 +64,8 @@ exports.signup = async (req, res) => {
         if (existing) return res.status(409).json({ message: "Email already in use" });
         
         const user = await User.create({ email, password, name });
+        user.lastLoginAt = new Date();
+        await user.save();
 
         const { token, session } = await createAuthSessionToken({
           user,
@@ -95,6 +101,9 @@ exports.login = async (req, res) => {
         if (!match) {
             return res.status(401).json({ message: "Invalid credentials" });
         }
+
+        user.lastLoginAt = new Date();
+        await user.save();
 
         const { token, session } = await createAuthSessionToken({
           user,

@@ -47,6 +47,9 @@ const userSchema = new mongoose.Schema(
     subscriptionCurrentPeriodEnd: {
       type: Date,
     },
+    subscriptionLastSyncedAt: {
+      type: Date,
+    },
     platformSubscriptionOverride: {
       type: String,
       enum: ['none', 'pro', 'free'],
@@ -58,6 +61,20 @@ const userSchema = new mongoose.Schema(
     platformSubscriptionOverrideBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
+      default: null,
+    },
+    platformSubscriptionOverrideExpiresAt: {
+      type: Date,
+      default: null,
+    },
+    platformSubscriptionOverrideReason: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: null,
+    },
+    lastLoginAt: {
+      type: Date,
       default: null,
     },
     accountStatus: {

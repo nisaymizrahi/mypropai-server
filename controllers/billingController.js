@@ -157,6 +157,7 @@ const syncUserSubscription = async (user, subscription, fallbackPlanKey = 'pro')
   user.subscriptionCurrentPeriodEnd = subscription.current_period_end
     ? new Date(subscription.current_period_end * 1000)
     : null;
+  user.subscriptionLastSyncedAt = new Date();
 
   if (SUBSCRIPTION_DEACTIVATED_STATUSES.has(status)) {
     user.subscriptionPlan = 'free';

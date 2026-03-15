@@ -30,6 +30,8 @@ require('./models/Bid');
 require('./models/Application');
 require('./models/Purchase');
 require('./models/FeatureUsage');
+require('./models/PlatformAuditLog');
+require('./models/PlatformSupportNote');
 require('./models/Task');
 require('./models/PropertyReport');
 // --- End of Model Registration ---
