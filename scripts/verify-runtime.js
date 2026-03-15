@@ -5,6 +5,7 @@ process.env.SKIP_REDIS_CONNECT = '1';
 
 const modelModules = [
   './models/User',
+  './models/AuthSession',
   './models/Property',
   './models/Investment',
   './models/ManagedProperty',
@@ -24,6 +25,7 @@ const modelModules = [
   './models/Bid',
   './models/Application',
   './models/Purchase',
+  './models/PropertyReport',
 ];
 
 const routeModules = [
@@ -51,6 +53,7 @@ const routeModules = [
   './routes/notifications',
   './routes/billingRoutes',
   './routes/properties',
+  './routes/propertyReports',
   './routes/platformManagerRoutes',
   './routes/applicationRoutes',
 ];
