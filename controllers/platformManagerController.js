@@ -12,9 +12,10 @@ const Tenant = require('../models/Tenant');
 const User = require('../models/User');
 const Vendor = require('../models/Vendor');
 const { getEffectiveSubscriptionState } = require('../utils/billingAccess');
-const { signJwt } = require('../utils/jwtConfig');
+const { createAuthSessionToken } = require('../utils/authSessionService');
 const { normalizeEmail } = require('../utils/platformAccess');
 const IMPERSONATION_TOKEN_TTL = '2h';
+const IMPERSONATION_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
 const USER_RELATED_MODELS = [
   { key: 'leads', model: Lead },
@@ -220,15 +221,20 @@ exports.createImpersonationSession = async (req, res) => {
       return res.status(403).json({ msg: 'Reactivate this user before impersonating their workspace.' });
     }
 
-    const token = signJwt(
-      {
-        userId: targetUser._id,
+    const { token } = await createAuthSessionToken({
+      user: targetUser,
+      req,
+      actorUser: req.user,
+      authMethod: 'impersonation',
+      sessionType: 'impersonation',
+      expiresIn: IMPERSONATION_TOKEN_TTL,
+      absoluteTimeoutMs: IMPERSONATION_TIMEOUT_MS,
+      extraPayload: {
         actorUserId: req.user._id,
         actorEmail: normalizeEmail(req.user.email),
         impersonation: true,
       },
-      { expiresIn: IMPERSONATION_TOKEN_TTL }
-    );
+    });
 
     return res.json({
       token,

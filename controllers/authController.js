@@ -1,9 +1,12 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
-const redisClient = require('../config/redisClient');
 const { getEffectiveSubscriptionState } = require('../utils/billingAccess');
-const { signJwt } = require('../utils/jwtConfig');
 const { isPlatformManager } = require('../utils/platformAccess');
+const { createAuthSessionToken, revokeAuthSession } = require('../utils/authSessionService');
+const {
+  AUTH_ABSOLUTE_TIMEOUT_HOURS,
+  AUTH_IDLE_TIMEOUT_MINUTES,
+} = require('../utils/authSessionPolicy');
 
 const buildAuthUser = (user, options = {}) => {
   const impersonation = options.impersonation || { active: false };
@@ -30,10 +33,16 @@ const buildAuthUser = (user, options = {}) => {
   };
 };
 
-// Helper function to generate a token
-const generateToken = (user, payload = {}, expiresIn = '7d') => {
-  return signJwt({ userId: user._id, ...payload }, { expiresIn });
-};
+const buildAuthResponse = (user, token, session, options = {}) => ({
+  token,
+  user: buildAuthUser(user, options),
+  session: {
+    id: session?._id ? String(session._id) : null,
+    expiresAt: session?.expiresAt || null,
+    idleTimeoutMinutes: AUTH_IDLE_TIMEOUT_MINUTES,
+    absoluteTimeoutHours: AUTH_ABSOLUTE_TIMEOUT_HOURS,
+  },
+});
 
 // @desc    Register a new user
 exports.signup = async (req, res) => {
@@ -52,8 +61,12 @@ exports.signup = async (req, res) => {
         
         const user = await User.create({ email, password, name });
 
-        const token = generateToken(user);
-        res.status(201).json({ token, user: buildAuthUser(user) });
+        const { token, session } = await createAuthSessionToken({
+          user,
+          req,
+          authMethod: 'password',
+        });
+        res.status(201).json(buildAuthResponse(user, token, session));
     } catch (err) {
         console.error("Signup error:", err);
         res.status(500).json({ message: "Internal server error" });
@@ -83,8 +96,12 @@ exports.login = async (req, res) => {
             return res.status(401).json({ message: "Invalid credentials" });
         }
 
-        const token = generateToken(user);
-        res.json({ token, user: buildAuthUser(user) });
+        const { token, session } = await createAuthSessionToken({
+          user,
+          req,
+          authMethod: 'password',
+        });
+        res.json(buildAuthResponse(user, token, session));
     } catch (err) {
         console.error("Login error:", err);
         res.status(500).json({ message: "Internal server error" });
@@ -94,23 +111,7 @@ exports.login = async (req, res) => {
 // @desc    Log out a user and blocklist the token
 exports.logout = async (req, res) => {
     try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
-            return res.sendStatus(204);
-        }
-
-        const token = authHeader.split(" ")[1];
-        const decoded = jwt.decode(token);
-
-        const expiresAt = decoded.exp * 1000;
-        const remainingSeconds = Math.ceil((expiresAt - Date.now()) / 1000);
-
-        if (remainingSeconds > 0) {
-            await redisClient.set(token, 'blocklisted', {
-                EX: remainingSeconds
-            });
-        }
-        
+        await revokeAuthSession(req.auth?.session?.id);
         res.status(200).json({ message: "Logged out successfully" });
     } catch (err) {
         console.error("Logout error:", err);

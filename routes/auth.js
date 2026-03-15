@@ -3,7 +3,7 @@ const passport = require("passport");
 const router = express.Router();
 const authController = require('../controllers/authController');
 const requireAuth = require('../middleware/requireAuth');
-const { signJwt } = require('../utils/jwtConfig');
+const { createAuthSessionToken } = require('../utils/authSessionService');
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
@@ -18,6 +18,7 @@ router.get(
   passport.authenticate("google", {
     scope: ["profile", "email"],
     state: true,
+    prompt: "select_account",
   })
 );
 
@@ -27,7 +28,7 @@ router.get(
     session: false,
     failureRedirect: `${FRONTEND_URL}/login?error=oauth`,
   }),
-  (req, res) => {
+  async (req, res) => {
     try {
       if (!req.user) {
         return res.redirect(`${FRONTEND_URL}/login?error=nouser`);
@@ -37,7 +38,11 @@ router.get(
         return res.redirect(`${FRONTEND_URL}/login?error=suspended`);
       }
 
-      const token = signJwt({ userId: req.user._id }, { expiresIn: "7d" });
+      const { token } = await createAuthSessionToken({
+        user: req.user,
+        req,
+        authMethod: "google",
+      });
       const encodedToken = encodeURIComponent(token);
       const redirectUrl = `${FRONTEND_URL}/login-continue#token=${encodedToken}`;
       res.redirect(redirectUrl);

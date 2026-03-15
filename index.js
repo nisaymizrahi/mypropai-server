@@ -9,6 +9,7 @@ const connectDB = require("./config/db");
 
 // --- Register all database models on startup ---
 require('./models/User'); 
+require('./models/AuthSession');
 require('./models/Property');
 require('./models/Investment');
 require('./models/ManagedProperty');

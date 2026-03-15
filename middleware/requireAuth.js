@@ -1,8 +1,11 @@
 const mongoose = require('mongoose');
 const User = mongoose.model('User');
 const redisClient = require('../config/redisClient'); // 1. IMPORT REDIS CLIENT
+const AuthSession = mongoose.model('AuthSession');
 const { verifyJwt } = require('../utils/jwtConfig');
 const { isPlatformManager } = require('../utils/platformAccess');
+const { AUTH_IDLE_TIMEOUT_MS } = require('../utils/authSessionPolicy');
+const { maybeTouchAuthSession, revokeAuthSession } = require('../utils/authSessionService');
 
 const requireAuth = async (req, res, next) => {
   const { authorization } = req.headers;
@@ -21,6 +24,29 @@ const requireAuth = async (req, res, next) => {
     }
 
     const decoded = verifyJwt(token);
+    if (!decoded?.sessionId) {
+      return res.status(401).json({ error: "Session expired. Please sign in again." });
+    }
+
+    const session = await AuthSession.findById(decoded.sessionId);
+    if (!session || String(session.user) !== String(decoded.userId)) {
+      return res.status(401).json({ error: "Session expired. Please sign in again." });
+    }
+
+    if (session.revokedAt) {
+      return res.status(401).json({ error: "Session has been signed out." });
+    }
+
+    const now = Date.now();
+    if (session.expiresAt && session.expiresAt.getTime() <= now) {
+      await revokeAuthSession(session._id, new Date(now));
+      return res.status(401).json({ error: "Session expired. Please sign in again." });
+    }
+
+    if (session.lastActivityAt && now - session.lastActivityAt.getTime() >= AUTH_IDLE_TIMEOUT_MS) {
+      await revokeAuthSession(session._id, new Date(now));
+      return res.status(401).json({ error: "Session expired due to inactivity." });
+    }
     
     const user = await User.findById(decoded.userId).select("-password");
     if (!user) {
@@ -49,9 +75,16 @@ const requireAuth = async (req, res, next) => {
       impersonation.startedAt = decoded.iat ? new Date(decoded.iat * 1000) : null;
     }
 
+    await maybeTouchAuthSession(session, new Date(now));
+
     req.user = user;
     req.auth = {
       token,
+      session: {
+        id: session._id,
+        expiresAt: session.expiresAt,
+        lastActivityAt: session.lastActivityAt,
+      },
       impersonation,
     };
     
