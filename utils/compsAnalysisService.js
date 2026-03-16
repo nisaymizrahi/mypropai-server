@@ -229,6 +229,7 @@ const normalizeComparableSale = (comp = {}, fallbackIndex = 0) => ({
   id: buildComparableId(comp, fallbackIndex),
   address:
     comp.formattedAddress ||
+    comp.address ||
     [comp.addressLine1, comp.addressLine2, comp.city, comp.state, comp.zipCode]
       .filter(Boolean)
       .join(", "),
