@@ -4,10 +4,55 @@ const bcrypt = require("bcryptjs");
 const userSchema = new mongoose.Schema(
   {
     name: { type: String },
+    firstName: { type: String, trim: true, default: null },
+    lastName: { type: String, trim: true, default: null },
     email: { type: String, required: true, unique: true, lowercase: true },
     password: { type: String },
+    hasPassword: { type: Boolean, default: false },
     googleId: { type: String },
     avatar: { type: String },
+    companyName: { type: String, trim: true, default: null },
+    phoneNumber: { type: String, trim: true, default: null },
+    profileCompletionRequired: {
+      type: Boolean,
+      default: false,
+    },
+    profileCompletedAt: {
+      type: Date,
+      default: null,
+    },
+    termsAcceptedAt: {
+      type: Date,
+      default: null,
+    },
+    termsVersion: {
+      type: String,
+      default: null,
+    },
+    privacyAcceptedAt: {
+      type: Date,
+      default: null,
+    },
+    privacyVersion: {
+      type: String,
+      default: null,
+    },
+    marketingConsent: {
+      type: Boolean,
+      default: false,
+    },
+    marketingConsentAcceptedAt: {
+      type: Date,
+      default: null,
+    },
+    marketingConsentRevokedAt: {
+      type: Date,
+      default: null,
+    },
+    marketingConsentVersion: {
+      type: String,
+      default: null,
+    },
     
     // --- ✅ NEW: Fields for Stripe Connect ---
     stripeAccountId: { 
@@ -106,12 +151,14 @@ userSchema.pre("save", async function (next) {
 
   // If there's no password (e.g. Google login), continue
   if (!this.password) {
+    this.hasPassword = false;
     return next();
   }
 
   // Hash the password with a cost of 12
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
+  this.hasPassword = true;
 
   next();
 });

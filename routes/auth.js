@@ -14,6 +14,7 @@ router.post("/logout", requireAuth, authController.logout);
 router.post("/forgot-password", authController.requestPasswordReset);
 router.get("/reset-password/validate", authController.validatePasswordResetToken);
 router.post("/reset-password", authController.resetPasswordWithToken);
+router.post("/complete-profile", requireAuth, authController.completeProfile);
 
 // --- Google OAuth ---
 router.get(

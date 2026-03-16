@@ -2,6 +2,12 @@ require("dotenv").config();
 const passport = require("passport");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const User = require("../models/User");
+const { normalizeEmail } = require("../utils/platformAccess");
+const {
+  applyProfileFields,
+  buildDisplayName,
+  isProfileCompletionRequired,
+} = require("../utils/userProfile");
 
 passport.use(
   new GoogleStrategy(
@@ -12,15 +18,45 @@ passport.use(
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
-        let user = await User.findOne({ googleId: profile.id });
+        const email = normalizeEmail(profile?.emails?.[0]?.value || "");
+        const avatar = profile?.photos?.[0]?.value || null;
+
+        if (!email) {
+          return done(new Error("Google sign-in did not return an email address."), null);
+        }
+
+        let user = await User.findOne({
+          $or: [{ googleId: profile.id }, { email }],
+        });
 
         if (!user) {
-          user = await User.create({
+          user = new User({
             googleId: profile.id,
-            name: profile.displayName,
-            email: profile.emails[0].value,
+            email,
+            avatar,
+            profileCompletionRequired: true,
           });
+        } else {
+          user.googleId = user.googleId || profile.id;
+          user.avatar = user.avatar || avatar;
+          if (user.password && !user.hasPassword) {
+            user.hasPassword = true;
+          }
         }
+
+        applyProfileFields(user, {
+          firstName: profile?.name?.givenName || user.firstName,
+          lastName: profile?.name?.familyName || user.lastName,
+          name: profile?.displayName || user.name,
+        });
+        user.name = buildDisplayName(user);
+        user.profileCompletionRequired = isProfileCompletionRequired(user);
+
+        if (!user.profileCompletionRequired && !user.profileCompletedAt) {
+          user.profileCompletedAt = new Date();
+        }
+
+        await user.save();
 
         done(null, user);
       } catch (err) {

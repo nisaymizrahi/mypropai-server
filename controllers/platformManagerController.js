@@ -27,6 +27,13 @@ const { createAuthSessionToken } = require('../utils/authSessionService');
 const { issuePasswordResetForUser } = require('./authController');
 const { getStripeClient } = require('../lib/stripe');
 const { normalizeEmail } = require('../utils/platformAccess');
+const {
+  buildAuthProviders,
+  buildConsentSummary,
+  buildDisplayName,
+  getResolvedNameParts,
+  isProfileCompletionRequired,
+} = require('../utils/userProfile');
 
 const IMPERSONATION_TOKEN_TTL = '2h';
 const IMPERSONATION_TIMEOUT_MS = 2 * 60 * 60 * 1000;
@@ -216,12 +223,21 @@ const buildUserSummary = async (user, currentPlatformManagerId, context = {}) =>
   const hasBillingIssue = Boolean(
     user.subscriptionSource === 'stripe' && BILLING_ISSUE_STATUSES.has(user.subscriptionStatus || '')
   );
+  const nameParts = getResolvedNameParts(user);
+  const consent = buildConsentSummary(user);
 
   return {
     id: user._id,
-    name: user.name || 'Unnamed user',
+    name: buildDisplayName(user),
+    firstName: nameParts.firstName || '',
+    lastName: nameParts.lastName || '',
     email: user.email,
     avatar: user.avatar || null,
+    companyName: user.companyName || null,
+    phoneNumber: user.phoneNumber || null,
+    consent,
+    authProviders: buildAuthProviders(user),
+    profileCompletionRequired: isProfileCompletionRequired(user),
     accountStatus: user.accountStatus || 'active',
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
@@ -573,7 +589,14 @@ exports.getUsers = async (req, res) => {
     if (query) {
       const safeQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const regex = new RegExp(safeQuery, 'i');
-      filter.$or = [{ name: regex }, { email: regex }];
+      filter.$or = [
+        { name: regex },
+        { firstName: regex },
+        { lastName: regex },
+        { email: regex },
+        { companyName: regex },
+        { phoneNumber: regex },
+      ];
     }
 
     const users = await User.find(filter)
@@ -629,8 +652,20 @@ exports.getUsers = async (req, res) => {
         freeUsers: 0,
         overriddenUsers: 0,
         billingIssueUsers: 0,
+        marketingOptInUsers: 0,
+        profileCompletionUsers: 0,
       }
     );
+
+    summaries.forEach((user) => {
+      if (user.consent?.marketingOptIn) {
+        stats.marketingOptInUsers += 1;
+      }
+
+      if (user.profileCompletionRequired) {
+        stats.profileCompletionUsers += 1;
+      }
+    });
 
     return res.json({
       stats,
@@ -654,7 +689,14 @@ exports.exportUsers = async (req, res) => {
     if (query) {
       const safeQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const regex = new RegExp(safeQuery, 'i');
-      filter.$or = [{ name: regex }, { email: regex }];
+      filter.$or = [
+        { name: regex },
+        { firstName: regex },
+        { lastName: regex },
+        { email: regex },
+        { companyName: regex },
+        { phoneNumber: regex },
+      ];
     }
 
     const users = await User.find(filter).sort({ createdAt: -1 }).limit(1000);
@@ -674,7 +716,17 @@ exports.exportUsers = async (req, res) => {
 
     const header = [
       'Name',
+      'First Name',
+      'Last Name',
       'Email',
+      'Company',
+      'Phone',
+      'Auth Providers',
+      'Profile Completion Required',
+      'Terms Accepted',
+      'Terms Accepted At',
+      'Marketing Opt In',
+      'Marketing Consent Accepted At',
       'Status',
       'Effective Plan',
       'Override',
@@ -699,7 +751,17 @@ exports.exportUsers = async (req, res) => {
 
     const rows = summaries.map((user) => [
       user.name,
+      user.firstName,
+      user.lastName,
       user.email,
+      user.companyName || '',
+      user.phoneNumber || '',
+      user.authProviders?.label || '',
+      user.profileCompletionRequired ? 'yes' : 'no',
+      user.consent?.termsAccepted ? 'yes' : 'no',
+      user.consent?.termsAcceptedAt || '',
+      user.consent?.marketingOptIn ? 'yes' : 'no',
+      user.consent?.marketingConsentAcceptedAt || '',
       user.accountStatus,
       user.subscription.plan,
       user.subscription.override,
