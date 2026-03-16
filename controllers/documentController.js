@@ -2,10 +2,83 @@ const ProjectDocument = require('../models/ProjectDocument');
 const Investment = require('../models/Investment');
 const cloudinary = require('cloudinary').v2;
 
+const LEGACY_PRIMARY_FUNDING_SOURCE_ID = 'legacy-primary-funding-source';
+
+const toOptionalString = (value) => String(value || '').trim();
+
+const findFundingSource = (investment, sourceId) => {
+    if (!sourceId) {
+        return null;
+    }
+
+    if (
+        sourceId === LEGACY_PRIMARY_FUNDING_SOURCE_ID &&
+        (!Array.isArray(investment?.fundingSources) || investment.fundingSources.length === 0) &&
+        (Number(investment?.loanAmount || 0) > 0 ||
+            toOptionalString(investment?.loanType) ||
+            toOptionalString(investment?.lenderName))
+    ) {
+        return {
+            sourceId: LEGACY_PRIMARY_FUNDING_SOURCE_ID,
+            name: toOptionalString(investment?.lenderName),
+            type: toOptionalString(investment?.loanType),
+        };
+    }
+
+    return (
+        investment?.fundingSources?.find(
+            (source) => String(source?.sourceId || '') === String(sourceId)
+        ) || null
+    );
+};
+
+const findDrawRequest = (investment, drawRequestId) => {
+    if (!drawRequestId) {
+        return null;
+    }
+
+    return (
+        investment?.drawRequests?.find(
+            (request) => String(request?.drawId || '') === String(drawRequestId)
+        ) || null
+    );
+};
+
+const resolveFinanceLink = ({ investment, fundingSourceId, drawRequestId }) => {
+    const nextFundingSourceId = toOptionalString(fundingSourceId);
+    const nextDrawRequestId = toOptionalString(drawRequestId);
+    const matchedDrawRequest = findDrawRequest(investment, nextDrawRequestId);
+
+    if (nextDrawRequestId && !matchedDrawRequest) {
+        return { error: 'Selected draw request was not found for this project.' };
+    }
+
+    let resolvedFundingSourceId = nextFundingSourceId;
+
+    if (matchedDrawRequest?.sourceId) {
+        const drawSourceId = toOptionalString(matchedDrawRequest.sourceId);
+
+        if (resolvedFundingSourceId && resolvedFundingSourceId !== drawSourceId) {
+            return { error: 'Selected draw request does not match the chosen funding source.' };
+        }
+
+        resolvedFundingSourceId = drawSourceId;
+    }
+
+    if (resolvedFundingSourceId && !findFundingSource(investment, resolvedFundingSourceId)) {
+        return { error: 'Selected funding source was not found for this project.' };
+    }
+
+    return {
+        fundingSourceId: resolvedFundingSourceId,
+        drawRequestId: nextDrawRequestId,
+    };
+};
+
 // @desc    Upload a new document
 exports.uploadDocument = async (req, res) => {
     try {
-        const { investmentId, displayName, category } = req.body;
+        const { investmentId, displayName, category, fundingSourceId, drawRequestId } = req.body;
 
         if (!req.file) {
             return res.status(400).json({ msg: 'No file uploaded.' });
@@ -20,11 +93,23 @@ exports.uploadDocument = async (req, res) => {
             return res.status(401).json({ msg: 'Not authorized for this investment.' });
         }
 
+        const financeLink = resolveFinanceLink({
+            investment,
+            fundingSourceId,
+            drawRequestId,
+        });
+
+        if (financeLink.error) {
+            return res.status(400).json({ msg: financeLink.error });
+        }
+
         const newDocument = new ProjectDocument({
             investment: investmentId,
             user: req.user.id,
             displayName,
             category,
+            fundingSourceId: financeLink.fundingSourceId,
+            drawRequestId: financeLink.drawRequestId,
             fileUrl: req.file.path,
             cloudinaryId: req.file.filename,
         });

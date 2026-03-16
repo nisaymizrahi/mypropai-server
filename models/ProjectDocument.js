@@ -25,6 +25,16 @@ const ProjectDocumentSchema = new mongoose.Schema({
     default: 'General',
     trim: true,
   },
+  fundingSourceId: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  drawRequestId: {
+    type: String,
+    default: '',
+    trim: true,
+  },
   // The secure URL from Cloudinary.
   fileUrl: {
     type: String,

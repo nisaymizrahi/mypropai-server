@@ -24,6 +24,31 @@ const ExpenseSchema = new mongoose.Schema({
     default: '',
     trim: true,
   },
+  fundingSourceId: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  drawRequestId: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  status: {
+    type: String,
+    enum: ['draft', 'approved', 'paid', 'reimbursed'],
+    default: 'paid',
+  },
+  paymentMethod: {
+    type: String,
+    enum: ['other', 'ach', 'wire', 'check', 'cash', 'credit_card', 'debit_card'],
+    default: 'other',
+  },
+  recurringCategory: {
+    type: String,
+    enum: ['', 'taxes', 'insurance', 'utilities', 'other_monthly'],
+    default: '',
+  },
   title: {
     type: String,
     required: [true, 'Please provide a title for the expense.'],

@@ -5,6 +5,11 @@ const Vendor = require('../models/Vendor');
 const cloudinary = require('cloudinary').v2;
 const OpenAI = require('openai');
 
+const LEGACY_PRIMARY_FUNDING_SOURCE_ID = 'legacy-primary-funding-source';
+const EXPENSE_STATUS_VALUES = ['draft', 'approved', 'paid', 'reimbursed'];
+const EXPENSE_PAYMENT_METHOD_VALUES = ['other', 'ach', 'wire', 'check', 'cash', 'credit_card', 'debit_card'];
+const EXPENSE_RECURRING_CATEGORY_VALUES = ['', 'taxes', 'insurance', 'utilities', 'other_monthly'];
+
 const getOpenAIClient = () => {
   if (!process.env.OPENAI_API_KEY) {
     return null;
@@ -41,6 +46,21 @@ const parseExtractionPayload = (value) => {
   } catch (error) {
     return null;
   }
+};
+
+const toExpenseStatus = (value) => {
+  const normalized = toOptionalString(value).toLowerCase();
+  return EXPENSE_STATUS_VALUES.includes(normalized) ? normalized : 'paid';
+};
+
+const toExpensePaymentMethod = (value) => {
+  const normalized = toOptionalString(value).toLowerCase();
+  return EXPENSE_PAYMENT_METHOD_VALUES.includes(normalized) ? normalized : 'other';
+};
+
+const toExpenseRecurringCategory = (value) => {
+  const normalized = toOptionalString(value).toLowerCase();
+  return EXPENSE_RECURRING_CATEGORY_VALUES.includes(normalized) ? normalized : '';
 };
 
 const populateExpense = (query) =>
@@ -84,6 +104,77 @@ const getAuthorizedBudgetItem = async (budgetItemId, investmentId, userId) => {
   }
 
   return budgetItem;
+};
+
+const findFundingSource = (investment, sourceId) => {
+  if (!sourceId) {
+    return null;
+  }
+
+  if (
+    sourceId === LEGACY_PRIMARY_FUNDING_SOURCE_ID &&
+    (!Array.isArray(investment?.fundingSources) || investment.fundingSources.length === 0) &&
+    (toOptionalNumber(investment?.loanAmount) > 0 ||
+      toOptionalString(investment?.loanType) ||
+      toOptionalString(investment?.lenderName))
+  ) {
+    return {
+      sourceId: LEGACY_PRIMARY_FUNDING_SOURCE_ID,
+      name: toOptionalString(investment?.lenderName),
+      type: toOptionalString(investment?.loanType),
+    };
+  }
+
+  return (
+    investment?.fundingSources?.find(
+      (source) => String(source?.sourceId || '') === String(sourceId)
+    ) || null
+  );
+};
+
+const findDrawRequest = (investment, drawRequestId) => {
+  if (!drawRequestId) {
+    return null;
+  }
+
+  return (
+    investment?.drawRequests?.find(
+      (request) => String(request?.drawId || '') === String(drawRequestId)
+    ) || null
+  );
+};
+
+const resolveFinanceLink = ({ investment, fundingSourceId, drawRequestId }) => {
+  const nextFundingSourceId = toOptionalString(fundingSourceId);
+  const nextDrawRequestId = toOptionalString(drawRequestId);
+  const matchedDrawRequest = findDrawRequest(investment, nextDrawRequestId);
+
+  if (nextDrawRequestId && !matchedDrawRequest) {
+    return { error: 'Selected draw request was not found for this project.' };
+  }
+
+  let resolvedFundingSourceId = nextFundingSourceId;
+
+  if (matchedDrawRequest?.sourceId) {
+    const drawSourceId = toOptionalString(matchedDrawRequest.sourceId);
+
+    if (resolvedFundingSourceId && resolvedFundingSourceId !== drawSourceId) {
+      return {
+        error: 'Selected draw request does not match the chosen funding source.',
+      };
+    }
+
+    resolvedFundingSourceId = drawSourceId;
+  }
+
+  if (resolvedFundingSourceId && !findFundingSource(investment, resolvedFundingSourceId)) {
+    return { error: 'Selected funding source was not found for this project.' };
+  }
+
+  return {
+    fundingSourceId: resolvedFundingSourceId,
+    drawRequestId: nextDrawRequestId,
+  };
 };
 
 const normalizeVendorKey = (value = '') =>
@@ -158,6 +249,11 @@ const buildExpensePayload = ({ body = {}, budgetItem = null }) => {
   return {
     budgetItem: budgetItem?._id || null,
     awardId,
+    fundingSourceId: toOptionalString(body.fundingSourceId),
+    drawRequestId: toOptionalString(body.drawRequestId),
+    status: toExpenseStatus(body.status),
+    paymentMethod: toExpensePaymentMethod(body.paymentMethod),
+    recurringCategory: toExpenseRecurringCategory(body.recurringCategory),
     title,
     description,
     amount,
@@ -193,6 +289,11 @@ exports.createExpense = async (req, res) => {
     }
 
     const payload = buildExpensePayload({ body: req.body, budgetItem });
+    const financeLink = resolveFinanceLink({
+      investment,
+      fundingSourceId: payload.fundingSourceId,
+      drawRequestId: payload.drawRequestId,
+    });
 
     if (!payload.title || payload.amount === null) {
       return res.status(400).json({ msg: 'Title and amount are required.' });
@@ -202,11 +303,20 @@ exports.createExpense = async (req, res) => {
       return res.status(400).json({ msg: 'Choose a vendor or enter the payee name.' });
     }
 
+    if (financeLink.error) {
+      return res.status(400).json({ msg: financeLink.error });
+    }
+
     const newExpense = new Expense({
       user: req.user.id,
       investment: investmentId,
       budgetItem: payload.budgetItem,
       awardId: payload.awardId,
+      fundingSourceId: financeLink.fundingSourceId,
+      drawRequestId: financeLink.drawRequestId,
+      status: payload.status,
+      paymentMethod: payload.paymentMethod,
+      recurringCategory: payload.recurringCategory,
       title: payload.title,
       description: payload.description,
       amount: payload.amount,
@@ -394,6 +504,8 @@ exports.updateExpense = async (req, res) => {
     const hasBudgetItemInput =
       Object.prototype.hasOwnProperty.call(req.body, 'budgetItemId') ||
       Object.prototype.hasOwnProperty.call(req.body, 'budgetItem');
+    const hasFundingSourceInput = Object.prototype.hasOwnProperty.call(req.body, 'fundingSourceId');
+    const hasDrawRequestInput = Object.prototype.hasOwnProperty.call(req.body, 'drawRequestId');
     const requestedBudgetItemId = toOptionalString(req.body.budgetItemId || req.body.budgetItem);
     const budgetItem = hasBudgetItemInput
       ? await getAuthorizedBudgetItem(requestedBudgetItemId, String(expense.investment), req.user.id)
@@ -406,6 +518,16 @@ exports.updateExpense = async (req, res) => {
     }
 
     const payload = buildExpensePayload({ body: req.body, budgetItem });
+    const financeLink =
+      hasFundingSourceInput || hasDrawRequestInput
+        ? resolveFinanceLink({
+            investment,
+            fundingSourceId: hasFundingSourceInput
+              ? req.body.fundingSourceId
+              : expense.fundingSourceId,
+            drawRequestId: hasDrawRequestInput ? req.body.drawRequestId : expense.drawRequestId,
+          })
+        : null;
 
     if (req.body.title !== undefined || req.body.description !== undefined) {
       if (!payload.title) {
@@ -432,8 +554,22 @@ exports.updateExpense = async (req, res) => {
     if (req.body.date !== undefined) expense.date = payload.date || expense.date;
     if (req.body.notes !== undefined) expense.notes = payload.notes;
     if (req.body.entryMethod !== undefined) expense.entryMethod = payload.entryMethod;
+    if (req.body.status !== undefined) expense.status = payload.status;
+    if (req.body.paymentMethod !== undefined) expense.paymentMethod = payload.paymentMethod;
+    if (req.body.recurringCategory !== undefined) {
+      expense.recurringCategory = payload.recurringCategory;
+    }
     if (req.body.receiptExtraction !== undefined) {
       expense.receiptExtraction = payload.receiptExtraction;
+    }
+
+    if (financeLink?.error) {
+      return res.status(400).json({ msg: financeLink.error });
+    }
+
+    if (hasFundingSourceInput || hasDrawRequestInput) {
+      expense.fundingSourceId = financeLink?.fundingSourceId || '';
+      expense.drawRequestId = financeLink?.drawRequestId || '';
     }
 
     if (!expense.vendor && !expense.payeeName) {
