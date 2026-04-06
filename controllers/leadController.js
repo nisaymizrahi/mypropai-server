@@ -12,7 +12,9 @@ const {
   buildLegacyCompsAnalysisSnapshot,
   generateAiReport: generateSharedAiReport,
 } = require('../utils/compsAnalysisService');
+const { buildMasterDealReport } = require('../utils/masterDealReportService');
 const { consumeMatchingPurchase, getFeatureAccessState, recordFeatureUsage } = require('../utils/billingAccess');
+const { consumeOneCompsCredit } = require('../utils/compsCredits');
 const { upsertCanonicalProperty } = require('../utils/propertyRecordService');
 
 const getOpenAIClient = () => {
@@ -945,16 +947,7 @@ exports.analyzeComps = async (req, res) => {
   try {
     analysisStep = 'loading lead';
     const { id } = req.params;
-    const {
-      radius,
-      saleDateMonths,
-      maxComps,
-      propertyType: requestedPropertyTypeRaw,
-      minSquareFootage,
-      maxSquareFootage,
-      minLotSize,
-      maxLotSize,
-    } = req.body;
+    const { filters: filterPayload = {}, deal: dealPayload = {}, ...legacyFilterPayload } = req.body || {};
 
     const lead = await Lead.findById(id);
     if (!lead || lead.user.toString() !== req.user.id) {
@@ -971,8 +964,8 @@ exports.analyzeComps = async (req, res) => {
     if (!access.accessGranted) {
       return res.status(402).json({
         msg: access.hasActiveSubscription
-          ? 'You have used all 10 included Pro comps reports for this month. Buy this report one time to continue.'
-          : 'AI comps analysis requires Pro or a one-time comps report purchase for this lead.',
+          ? 'You are out of comps credits. Buy 10 more credits to keep going.'
+          : 'AI comps analysis requires available comps credits or Pro access.',
         billing: {
           featureKey: 'comps_report',
           planKey: access.planKey,
@@ -989,44 +982,16 @@ exports.analyzeComps = async (req, res) => {
     analysisStep = 'refreshing property preview';
     const preview = await getLeadPropertyPreview(buildPublicLeadSnapshot(lead)).catch(() => null);
     const subject = mergeLeadWithPreview(buildPublicLeadSnapshot(lead), preview || {});
-    const compsAnalysis = await buildSharedCompsAnalysis(subject, {
-      radius,
-      saleDateMonths,
-      maxComps,
-      propertyType: requestedPropertyTypeRaw,
-      minSquareFootage,
-      maxSquareFootage,
-      minLotSize,
-      maxLotSize,
-    });
+    const filters = Object.keys(filterPayload || {}).length ? filterPayload : legacyFilterPayload;
 
-    if (compsAnalysis.noResults) {
-      return res.status(200).json({
-        noResults: true,
-        msg: 'No comparable properties matched the selected filters. Try widening the radius or relaxing the size filters.',
-        subject,
-        summary: null,
-        comps: [],
-        ai: null,
-        filters: compsAnalysis.analysisFilters,
-        valuationContext: compsAnalysis.valuationContext,
-        generatedAt: null,
-      });
-    }
-
-    analysisStep = 'generating AI report';
-    const aiReport = await generateSharedAiReport(
+    analysisStep = 'building master deal report';
+    const masterReport = await buildMasterDealReport({
       subject,
-      compsAnalysis.summary,
-      compsAnalysis.rankedComps,
-      compsAnalysis.valuationContext,
-      compsAnalysis.analysisFilters
-    ).catch((error) => {
-      console.error('Lead AI report generation failed:', error.response?.data || error.message);
-      return null;
+      filters,
+      deal: dealPayload,
     });
 
-    const generatedAt = new Date();
+    const generatedAt = masterReport.generatedAt || new Date();
 
     analysisStep = 'saving comps analysis to lead';
     await Lead.updateOne(
@@ -1038,27 +1003,49 @@ exports.analyzeComps = async (req, res) => {
         $set: {
           compsAnalysis: buildLegacyCompsAnalysisSnapshot({
             generatedAt,
-            filters: compsAnalysis.analysisFilters,
-            valuationContext: compsAnalysis.valuationContext,
-            summary: compsAnalysis.summary,
-            aiReport,
-            comps: compsAnalysis.rankedComps,
+            filters: masterReport.filters,
+            valuationContext: masterReport.valuationContext,
+            summary: masterReport.summary,
+            aiReport: masterReport.aiVerdict
+              ? {
+                  headline: masterReport.aiVerdict.headline,
+                  executiveSummary: masterReport.aiVerdict.executiveSummary,
+                  pricingRecommendation: masterReport.aiVerdict.valueTakeaway,
+                  offerStrategy: masterReport.aiVerdict.dealTakeaway,
+                  confidence: masterReport.aiVerdict.confidence,
+                  riskFlags: masterReport.aiVerdict.riskFlags,
+                  nextSteps: masterReport.aiVerdict.nextSteps,
+                }
+              : null,
+            comps: masterReport.recentComps,
           }),
         },
       }
     );
 
-    if (access.accessSource === 'subscription_included') {
+    if (
+      access.accessSource === 'trial_credits' ||
+      access.accessSource === 'subscription_included' ||
+      access.accessSource === 'purchased_credits'
+    ) {
       analysisStep = 'recording feature usage';
       try {
+        await consumeOneCompsCredit({
+          userId: req.user.id,
+          metadata: {
+            featureKey: 'comps_report',
+            resourceType: 'lead',
+            resourceId: lead._id.toString(),
+          },
+        });
         await recordFeatureUsage({
           userId: req.user.id,
           featureKey: 'comps_report',
           resourceType: 'lead',
           resourceId: lead._id,
-          source: 'subscription_included',
+          source: access.accessSource,
           metadata: {
-            ...compsAnalysis.analysisFilters,
+            ...masterReport.filters,
           },
         });
       } catch (usageError) {
@@ -1086,15 +1073,7 @@ exports.analyzeComps = async (req, res) => {
     }
 
     analysisStep = 'returning response';
-    res.status(200).json({
-      subject,
-      summary: compsAnalysis.summary,
-      comps: compsAnalysis.rankedComps,
-      ai: aiReport,
-      filters: compsAnalysis.analysisFilters,
-      valuationContext: compsAnalysis.valuationContext,
-      generatedAt,
-    });
+    res.status(200).json(masterReport);
   } catch (error) {
     const detail =
       error?.response?.data?.msg ||

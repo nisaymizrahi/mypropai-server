@@ -20,6 +20,60 @@ const VendorDocumentSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    documentAsset: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'DocumentAsset',
+      default: null,
+    },
+    ownerAccount: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    secureUrl: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    cloudinaryAssetId: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    resourceType: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    deliveryType: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    fileBytes: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    originalFilename: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    mimeType: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    cloudinaryVersion: {
+      type: Number,
+      default: null,
+    },
+    cloudinaryFormat: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     issueDate: {
       type: Date,
       default: null,

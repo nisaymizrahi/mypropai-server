@@ -5,6 +5,8 @@ const Purchase = require('../models/Purchase');
 const User = require('../models/User');
 const { FEATURE_RULES, ONE_TIME_PRODUCTS, SUBSCRIPTION_PLANS } = require('../config/billingCatalog');
 const { getStripeClient } = require('../lib/stripe');
+const { grantCompsCredits } = require('../utils/compsCredits');
+const { buildStorageOverview } = require('../utils/documentStorageService');
 const {
   getEffectiveSubscriptionState,
   getCurrentPlan,
@@ -24,6 +26,9 @@ const formatCatalogPlan = (plan) => ({
   name: plan.name,
   description: plan.description,
   monthlyPriceCents: plan.monthlyPriceCents,
+  trialPeriodDays: plan.trialPeriodDays || 0,
+  trialIncludedCredits: plan.trialIncludedCredits || 0,
+  monthlyIncludedCredits: plan.monthlyIncludedCredits || 0,
   features: plan.features,
 });
 
@@ -39,6 +44,15 @@ const formatPurchase = (purchase) => ({
   consumedAt: purchase.consumedAt,
   createdAt: purchase.createdAt,
 });
+
+const sanitizeReturnPath = (value, fallback = '/account') => {
+  const candidate = String(value || '').trim();
+  if (!candidate.startsWith('/')) return fallback;
+  if (candidate.startsWith('//')) return fallback;
+  return candidate;
+};
+
+const isCompsCreditProduct = (product) => Boolean(product?.credits && product?.creditSourceType);
 
 const buildLineItem = ({ name, description, currency, unitAmount, recurring, stripePriceId }) => {
   if (stripePriceId) {
@@ -63,6 +77,10 @@ const buildLineItem = ({ name, description, currency, unitAmount, recurring, str
 };
 
 const buildResourceReturnPath = (resourceType, resourceId) => {
+  if (resourceType === 'account') {
+    return '/account';
+  }
+
   if (resourceType === 'lead') {
     return `/leads/${resourceId}`;
   }
@@ -98,10 +116,18 @@ const ensureStripeCustomer = async (user) => {
   return customer.id;
 };
 
-const resolvePurchaseTarget = async (userId, kind, resourceId) => {
+const resolvePurchaseTarget = async (userId, kind, resourceId, returnPath = null) => {
   const product = ONE_TIME_PRODUCTS[kind];
   if (!product) {
     return { status: 400, message: 'Unsupported purchase type.' };
+  }
+
+  if (product.resourceType === 'account') {
+    return {
+      entity: null,
+      resourceType: 'account',
+      returnPath: sanitizeReturnPath(returnPath, '/account'),
+    };
   }
 
   if (!mongoose.Types.ObjectId.isValid(resourceId)) {
@@ -154,10 +180,18 @@ const syncUserSubscription = async (user, subscription, fallbackPlanKey = 'pro')
   user.stripeSubscriptionId = subscription.id;
   user.subscriptionSource = 'stripe';
   user.subscriptionStatus = status;
+  user.subscriptionCurrentPeriodStart = subscription.current_period_start
+    ? new Date(subscription.current_period_start * 1000)
+    : null;
   user.subscriptionCurrentPeriodEnd = subscription.current_period_end
     ? new Date(subscription.current_period_end * 1000)
     : null;
   user.subscriptionLastSyncedAt = new Date();
+
+  if (!user.proTrialUsedAt && subscription.status === 'trialing') {
+    user.proTrialUsedAt = new Date();
+    user.proTrialSubscriptionId = subscription.id;
+  }
 
   if (SUBSCRIPTION_DEACTIVATED_STATUSES.has(status)) {
     user.subscriptionPlan = 'free';
@@ -168,6 +202,109 @@ const syncUserSubscription = async (user, subscription, fallbackPlanKey = 'pro')
 
   await user.save();
   return user;
+};
+
+const grantTrialCreditsForSubscription = async ({ user, subscription, sessionId = null }) => {
+  if (!user || !subscription || subscription.status !== 'trialing') {
+    return null;
+  }
+
+  const trialCredits = SUBSCRIPTION_PLANS.pro?.trialIncludedCredits || 0;
+  if (!trialCredits) {
+    return null;
+  }
+
+  const trialEndsAt = subscription.trial_end
+    ? new Date(subscription.trial_end * 1000)
+    : user.subscriptionCurrentPeriodEnd || null;
+
+  return grantCompsCredits({
+    userId: user._id,
+    sourceType: 'trial',
+    credits: trialCredits,
+    expiresAt: trialEndsAt,
+    cycleStart: subscription.trial_start ? new Date(subscription.trial_start * 1000) : null,
+    cycleEnd: trialEndsAt,
+    stripeCheckoutSessionId: sessionId,
+    stripeSubscriptionId: subscription.id,
+    grantKey: `trial:${subscription.id}`,
+    metadata: {
+      planKey: 'pro',
+      reason: 'pro_trial',
+    },
+  });
+};
+
+const grantMonthlyCreditsForInvoice = async (invoice) => {
+  const stripe = getStripeClient();
+  if (!stripe || !invoice?.subscription || !invoice?.customer) {
+    return null;
+  }
+
+  if (!Number.isFinite(invoice.amount_paid) || invoice.amount_paid <= 0) {
+    return null;
+  }
+
+  const user = await User.findOne({ stripeCustomerId: invoice.customer });
+  if (!user) {
+    return null;
+  }
+
+  const subscription =
+    typeof invoice.subscription === 'string'
+      ? await stripe.subscriptions.retrieve(invoice.subscription)
+      : invoice.subscription;
+
+  await syncUserSubscription(user, subscription, subscription.metadata?.planKey);
+
+  return grantCompsCredits({
+    userId: user._id,
+    sourceType: 'subscription_monthly',
+    credits: SUBSCRIPTION_PLANS.pro?.monthlyIncludedCredits || 50,
+    expiresAt: subscription.current_period_end ? new Date(subscription.current_period_end * 1000) : null,
+    cycleStart: subscription.current_period_start
+      ? new Date(subscription.current_period_start * 1000)
+      : null,
+    cycleEnd: subscription.current_period_end ? new Date(subscription.current_period_end * 1000) : null,
+    stripeSubscriptionId: subscription.id,
+    stripeInvoiceId: invoice.id,
+    grantKey: `invoice:${invoice.id}:subscription_monthly`,
+    metadata: {
+      planKey: 'pro',
+      reason: 'subscription_cycle',
+      invoiceBillingReason: invoice.billing_reason || null,
+    },
+  });
+};
+
+const fulfillPaidPurchase = async (purchase) => {
+  if (!purchase || purchase.status !== 'paid' || purchase.fulfilledAt) {
+    return purchase;
+  }
+
+  const product = ONE_TIME_PRODUCTS[purchase.kind];
+  if (!isCompsCreditProduct(product)) {
+    purchase.fulfilledAt = new Date();
+    await purchase.save();
+    return purchase;
+  }
+
+  await grantCompsCredits({
+    userId: purchase.user,
+    sourceType: product.creditSourceType,
+    credits: product.credits,
+    stripeCheckoutSessionId: purchase.stripeCheckoutSessionId || null,
+    grantKey: `purchase:${purchase._id}:credits`,
+    metadata: {
+      purchaseId: purchase._id.toString(),
+      kind: purchase.kind,
+      reason: product.creditSourceType,
+    },
+  });
+
+  purchase.fulfilledAt = new Date();
+  await purchase.save();
+  return purchase;
 };
 
 const markPurchasePaid = async (session) => {
@@ -188,6 +325,7 @@ const markPurchasePaid = async (session) => {
         ? session.payment_intent
         : session.payment_intent?.id;
     await purchase.save();
+    await fulfillPaidPurchase(purchase);
   }
 
   return purchase;
@@ -219,7 +357,14 @@ const syncSubscriptionFromCheckoutSession = async (session) => {
 
   if (!user) return null;
 
-  return syncUserSubscription(user, subscription, session.metadata?.planKey);
+  const syncedUser = await syncUserSubscription(user, subscription, session.metadata?.planKey);
+  await grantTrialCreditsForSubscription({
+    user: syncedUser,
+    subscription,
+    sessionId: session.id,
+  });
+
+  return syncedUser;
 };
 
 const syncCheckoutSessionById = async (sessionId, userId) => {
@@ -258,7 +403,12 @@ const handleSubscriptionWebhook = async (subscription) => {
   }
 
   if (SUBSCRIPTION_SYNC_STATUSES.has(subscription.status) || SUBSCRIPTION_DEACTIVATED_STATUSES.has(subscription.status)) {
-    return syncUserSubscription(user, subscription, subscription.metadata?.planKey);
+    const syncedUser = await syncUserSubscription(user, subscription, subscription.metadata?.planKey);
+    await grantTrialCreditsForSubscription({
+      user: syncedUser,
+      subscription,
+    });
+    return syncedUser;
   }
 
   return null;
@@ -278,6 +428,7 @@ exports.getBillingOverview = async (req, res) => {
       user,
       featureKey: 'comps_report',
     });
+    const documentStorage = buildStorageOverview(user);
 
     res.json({
       plan: {
@@ -285,10 +436,13 @@ exports.getBillingOverview = async (req, res) => {
         name: currentPlan.name,
         status: subscriptionState.status,
         isActive: subscriptionState.isActive,
+        isTrialing: subscriptionState.status === 'trialing',
         renewsAt: subscriptionState.renewsAt,
         source: subscriptionState.source,
         override: user.platformSubscriptionOverride || 'none',
         features: currentPlan.features,
+        trialEligible: !user.proTrialUsedAt && !subscriptionState.isActive,
+        trialUsedAt: user.proTrialUsedAt || null,
       },
       stripe: {
         customerId: user.stripeCustomerId || null,
@@ -309,16 +463,24 @@ exports.getBillingOverview = async (req, res) => {
             subscriberPriceCents: product.subscriberPriceCents || null,
             monthlyIncludedQuantity: FEATURE_RULES[product.key]?.subscriptionMonthlyIncludedQuantity || 0,
             resourceType: product.resourceType,
+            credits: product.credits || 0,
+            requiresActiveSubscription: Boolean(product.requiresActiveSubscription),
           };
         }),
       },
       usage: {
         compsReport: {
+          totalRemaining: compsUsage.totalCreditsRemaining || 0,
+          trialRemaining: compsUsage.trialCreditsRemaining || 0,
+          trialExpiresAt: compsUsage.trialCreditsExpiresAt || null,
           monthlyIncludedLimit: compsUsage.monthlyIncludedLimit,
           monthlyIncludedUsedCount: compsUsage.monthlyIncludedUsedCount,
           monthlyIncludedRemainingCount: compsUsage.monthlyIncludedRemainingCount,
           monthlyIncludedResetsAt: compsUsage.monthlyIncludedResetsAt,
+          purchasedRemaining: compsUsage.purchasedCreditsRemaining || 0,
+          nextCreditExpirationAt: compsUsage.nextCreditExpirationAt || null,
         },
+        documentStorage,
       },
       purchases: purchases.map(formatPurchase),
     });
@@ -354,6 +516,7 @@ exports.getResourceAccess = async (req, res) => {
       featureKey: access.featureKey,
       accessGranted: access.accessGranted,
       hasActiveSubscription: access.hasActiveSubscription,
+      trialEligible: !req.user.proTrialUsedAt && !isSubscriptionActive(req.user),
       hasUnusedPurchase: access.hasUnusedPurchase,
       planKey: access.planKey,
       accessSource: access.accessSource,
@@ -361,6 +524,11 @@ exports.getResourceAccess = async (req, res) => {
       monthlyIncludedUsedCount: access.monthlyIncludedUsedCount,
       monthlyIncludedRemainingCount: access.monthlyIncludedRemainingCount,
       monthlyIncludedResetsAt: access.monthlyIncludedResetsAt,
+      totalCreditsRemaining: access.totalCreditsRemaining || 0,
+      trialCreditsRemaining: access.trialCreditsRemaining || 0,
+      trialCreditsExpiresAt: access.trialCreditsExpiresAt || null,
+      purchasedCreditsRemaining: access.purchasedCreditsRemaining || 0,
+      nextCreditExpirationAt: access.nextCreditExpirationAt || null,
     });
   } catch (error) {
     console.error('Billing access error:', error);
@@ -391,6 +559,7 @@ exports.createSubscriptionCheckoutSession = async (req, res) => {
       return res.status(400).json({ msg: 'Pro is already active for this account. Use the billing portal to manage it.' });
     }
 
+    const isTrialEligible = !user.proTrialUsedAt;
     const customerId = await ensureStripeCustomer(user);
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
@@ -398,6 +567,7 @@ exports.createSubscriptionCheckoutSession = async (req, res) => {
       success_url: `${FRONTEND_URL}/account?billing_success=true&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${FRONTEND_URL}/account?billing_canceled=true`,
       allow_promotion_codes: true,
+      payment_method_collection: 'always',
       line_items: [
         buildLineItem({
           name: `${plan.name} Subscription`,
@@ -412,12 +582,18 @@ exports.createSubscriptionCheckoutSession = async (req, res) => {
         type: 'subscription',
         userId: user._id.toString(),
         planKey: plan.key,
+        trialEligible: isTrialEligible ? 'true' : 'false',
       },
       subscription_data: {
         metadata: {
           userId: user._id.toString(),
           planKey: plan.key,
         },
+        ...(isTrialEligible && plan.trialPeriodDays
+          ? {
+              trial_period_days: plan.trialPeriodDays,
+            }
+          : {}),
       },
     });
 
@@ -435,10 +611,14 @@ exports.createOneTimeCheckoutSession = async (req, res) => {
       return res.status(503).json({ msg: 'Stripe is not configured on the server.' });
     }
 
-    const { kind, resourceId } = req.body || {};
+    const { kind, resourceId = null, returnPath = null } = req.body || {};
     const product = getOneTimeProductForUser(kind, req.user);
     if (!product) {
       return res.status(400).json({ msg: 'Unsupported purchase type.' });
+    }
+
+    if (product.requiresActiveSubscription && !isSubscriptionActive(req.user)) {
+      return res.status(400).json({ msg: 'This purchase is only available for active Pro accounts.' });
     }
 
     if (kind === 'comps_report') {
@@ -456,23 +636,25 @@ exports.createOneTimeCheckoutSession = async (req, res) => {
       }
     }
 
-    const target = await resolvePurchaseTarget(req.user.id, kind, resourceId);
+    const target = await resolvePurchaseTarget(req.user.id, kind, resourceId, returnPath);
     if (target.status) {
       return res.status(target.status).json({ msg: target.message });
     }
 
-    const existingPurchase = await Purchase.findOne({
-      user: req.user.id,
-      kind,
-      resourceId,
-      status: 'paid',
-    }).sort({ createdAt: -1 });
+    if (product.resourceType !== 'account') {
+      const existingPurchase = await Purchase.findOne({
+        user: req.user.id,
+        kind,
+        resourceId,
+        status: 'paid',
+      }).sort({ createdAt: -1 });
 
-    if (existingPurchase) {
-      return res.json({
-        alreadyUnlocked: true,
-        msg: 'This item is already unlocked and ready to use.',
-      });
+      if (existingPurchase) {
+        return res.json({
+          alreadyUnlocked: true,
+          msg: 'This item is already unlocked and ready to use.',
+        });
+      }
     }
 
     const user = await User.findById(req.user.id);
@@ -511,7 +693,7 @@ exports.createOneTimeCheckoutSession = async (req, res) => {
         userId: user._id.toString(),
         purchaseId: purchase._id.toString(),
         kind,
-        resourceId: resourceId.toString(),
+        ...(resourceId ? { resourceId: resourceId.toString() } : {}),
       },
       client_reference_id: purchase._id.toString(),
     });
@@ -593,6 +775,9 @@ exports.handleStripeWebhook = async (req, res) => {
         break;
       case 'checkout.session.expired':
         await markPurchaseCanceled(event.data.object.id);
+        break;
+      case 'invoice.paid':
+        await grantMonthlyCreditsForInvoice(event.data.object);
         break;
       case 'customer.subscription.created':
       case 'customer.subscription.updated':

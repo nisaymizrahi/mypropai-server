@@ -6,10 +6,16 @@ const compsFiltersSchema = new mongoose.Schema(
     saleDateMonths: { type: Number },
     maxComps: { type: Number },
     propertyType: { type: String, trim: true },
+    minBedrooms: { type: Number },
+    maxBedrooms: { type: Number },
+    minBathrooms: { type: Number },
+    maxBathrooms: { type: Number },
     minSquareFootage: { type: Number },
     maxSquareFootage: { type: Number },
     minLotSize: { type: Number },
     maxLotSize: { type: Number },
+    minYearBuilt: { type: Number },
+    maxYearBuilt: { type: Number },
   },
   { _id: false }
 );
@@ -82,6 +88,13 @@ const comparableSchema = new mongoose.Schema(
     listingType: { type: String, trim: true },
     removedDate: { type: Date },
     daysOnMarket: { type: Number },
+    correlation: { type: Number },
+    rawDateSource: { type: String, trim: true },
+    compDataSource: { type: String, trim: true },
+    relevanceScore: { type: Number },
+    similarityScore: { type: Number },
+    selectionReason: { type: String, trim: true },
+    whySelected: { type: String, trim: true },
   },
   { _id: false }
 );
@@ -108,11 +121,14 @@ const propertyReportSchema = new mongoose.Schema(
     address: { type: String, trim: true, required: true, index: true },
     generatedAt: { type: Date, default: Date.now, index: true },
     subjectSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
+    dealSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
     filters: { type: compsFiltersSchema, default: null },
     valuationContext: { type: valuationContextSchema, default: null },
     summary: { type: compsSummarySchema, default: null },
-    ai: { type: aiReportSchema, default: null },
+    ai: { type: mongoose.Schema.Types.Mixed, default: null },
     comps: { type: [comparableSchema], default: [] },
+    reportData: { type: mongoose.Schema.Types.Mixed, default: null },
+    reportVersion: { type: Number, default: 1 },
   },
   { timestamps: true }
 );

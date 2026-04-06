@@ -23,6 +23,7 @@ require('./models/Expense');
 require('./models/Vendor');
 require('./models/ProjectTask');
 require('./models/ProjectDocument');
+require('./models/DocumentAsset');
 require('./models/MaintenanceTicket');
 require('./models/Inspection');
 require('./models/Lead');
@@ -30,10 +31,12 @@ require('./models/Bid');
 require('./models/Application');
 require('./models/Purchase');
 require('./models/FeatureUsage');
+require('./models/CompsCreditGrant');
 require('./models/PlatformAuditLog');
 require('./models/PlatformSupportNote');
 require('./models/Task');
 require('./models/PropertyReport');
+require('./models/SupportRequest');
 // --- End of Model Registration ---
 
 // --- Route Imports ---
@@ -64,12 +67,14 @@ const propertyRoutes = require("./routes/properties");
 const propertyReportRoutes = require("./routes/propertyReports");
 const platformManagerRoutes = require("./routes/platformManagerRoutes");
 const taskRoutes = require("./routes/taskRoutes");
+const supportRoutes = require("./routes/supportRoutes");
 // 1. IMPORT THE NEW APPLICATION ROUTES
 const applicationRoutes = require("./routes/applicationRoutes");
 const billingController = require("./controllers/billingController");
 const stripeController = require("./controllers/stripeController");
 const requireAuth = require("./middleware/requireAuth");
 const { getJwtSecret } = require("./utils/jwtConfig");
+const { resolveStoragePlan, bytesToHumanLabel } = require("./utils/documentStorageService");
 
 require("./config/passport");
 
@@ -186,12 +191,29 @@ app.use("/api/properties", requireAuth, propertyRoutes);
 app.use("/api/property-reports", requireAuth, propertyReportRoutes);
 app.use("/api/tasks", requireAuth, taskRoutes);
 app.use("/api/platform-manager", platformManagerRoutes);
+app.use("/api/support", supportRoutes);
 // 2. USE THE NEW APPLICATION ROUTES
 app.use("/api/applications", applicationRoutes); // Note: Auth is handled inside the routes file
 
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
+    const isDocumentUploadRequest =
+      req.method === "POST" &&
+      (req.originalUrl.startsWith("/api/documents") ||
+        req.originalUrl.startsWith("/api/managed-documents/") ||
+        /\/api\/vendors\/[^/]+\/documents/.test(req.originalUrl));
+
     if (err.code === "LIMIT_FILE_SIZE") {
+      if (isDocumentUploadRequest && req.user) {
+        const plan = resolveStoragePlan(req.user);
+        return res.status(413).json({
+          msg: `This file is too large for your plan. The maximum file size is ${bytesToHumanLabel(
+            plan.maxFileSizeBytes
+          )}.`,
+          code: "file_too_large",
+        });
+      }
+
       return res.status(413).json({ msg: "Uploaded file is too large." });
     }
 

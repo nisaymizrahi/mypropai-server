@@ -92,8 +92,19 @@ const userSchema = new mongoose.Schema(
     subscriptionCurrentPeriodEnd: {
       type: Date,
     },
+    subscriptionCurrentPeriodStart: {
+      type: Date,
+    },
     subscriptionLastSyncedAt: {
       type: Date,
+    },
+    proTrialUsedAt: {
+      type: Date,
+      default: null,
+    },
+    proTrialSubscriptionId: {
+      type: String,
+      default: null,
     },
     platformSubscriptionOverride: {
       type: String,
@@ -136,6 +147,22 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: ['active', 'suspended'],
       default: 'active',
+    },
+    documentStorage: {
+      bytesUsed: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      fileCount: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      lastReconciledAt: {
+        type: Date,
+        default: null,
+      },
     },
   },
   { timestamps: true }

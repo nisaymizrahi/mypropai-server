@@ -17,7 +17,7 @@ const PurchaseSchema = new mongoose.Schema(
     },
     resourceId: {
       type: mongoose.Schema.Types.ObjectId,
-      required: true,
+      default: null,
     },
     status: {
       type: String,
@@ -43,6 +43,10 @@ const PurchaseSchema = new mongoose.Schema(
     },
     consumedAt: {
       type: Date,
+    },
+    fulfilledAt: {
+      type: Date,
+      default: null,
     },
     metadata: {
       type: mongoose.Schema.Types.Mixed,

@@ -17,6 +17,17 @@ const formatCompsReportResponse = (report) => {
   const source = report?.toObject ? report.toObject() : report;
   if (!source) return null;
 
+  const reportData = source.reportData || null;
+  const summary = source.summary || reportData?.summary || null;
+  const ai = source.ai || reportData?.aiVerdict || null;
+  const comps = Array.isArray(source.comps) && source.comps.length
+    ? source.comps
+    : Array.isArray(reportData?.recentComps)
+      ? reportData.recentComps
+      : Array.isArray(reportData?.comps?.primary?.items)
+        ? reportData.comps.primary.items
+        : [];
+
   return {
     _id: source._id,
     kind: source.kind,
@@ -27,29 +38,32 @@ const formatCompsReportResponse = (report) => {
     createdAt: source.createdAt,
     updatedAt: source.updatedAt,
     subjectSnapshot: source.subjectSnapshot || null,
+    dealSnapshot: source.dealSnapshot || reportData?.dealInputs || null,
     filters: source.filters || null,
     valuationContext: source.valuationContext || null,
-    estimatedValue: source.summary?.estimatedValue ?? null,
-    estimatedValueLow: source.summary?.estimatedValueLow ?? null,
-    estimatedValueHigh: source.summary?.estimatedValueHigh ?? null,
-    averageSoldPrice: source.summary?.averageSoldPrice ?? null,
-    medianSoldPrice: source.summary?.medianSoldPrice ?? null,
-    lowSoldPrice: source.summary?.lowSoldPrice ?? null,
-    highSoldPrice: source.summary?.highSoldPrice ?? null,
-    averagePricePerSqft: source.summary?.averagePricePerSqft ?? null,
-    medianPricePerSqft: source.summary?.medianPricePerSqft ?? null,
-    lowPricePerSqft: source.summary?.lowPricePerSqft ?? null,
-    highPricePerSqft: source.summary?.highPricePerSqft ?? null,
-    averageDaysOnMarket: source.summary?.averageDaysOnMarket ?? null,
-    medianDaysOnMarket: source.summary?.medianDaysOnMarket ?? null,
-    lowDaysOnMarket: source.summary?.lowDaysOnMarket ?? null,
-    highDaysOnMarket: source.summary?.highDaysOnMarket ?? null,
-    saleCompCount: source.summary?.saleCompCount ?? null,
-    askingPriceDelta: source.summary?.askingPriceDelta ?? null,
-    recommendedOfferLow: source.summary?.recommendedOfferLow ?? null,
-    recommendedOfferHigh: source.summary?.recommendedOfferHigh ?? null,
-    report: source.ai || null,
-    recentComps: Array.isArray(source.comps) ? source.comps : [],
+    estimatedValue: summary?.estimatedValue ?? reportData?.valuation?.blendedEstimate ?? null,
+    estimatedValueLow: summary?.estimatedValueLow ?? reportData?.valuation?.blendedLow ?? null,
+    estimatedValueHigh: summary?.estimatedValueHigh ?? reportData?.valuation?.blendedHigh ?? null,
+    averageSoldPrice: summary?.averageSoldPrice ?? null,
+    medianSoldPrice: summary?.medianSoldPrice ?? reportData?.comps?.primary?.summary?.medianPrice ?? null,
+    lowSoldPrice: summary?.lowSoldPrice ?? null,
+    highSoldPrice: summary?.highSoldPrice ?? null,
+    averagePricePerSqft: summary?.averagePricePerSqft ?? reportData?.comps?.primary?.summary?.averagePricePerSqft ?? null,
+    medianPricePerSqft: summary?.medianPricePerSqft ?? reportData?.comps?.primary?.summary?.medianPricePerSqft ?? null,
+    lowPricePerSqft: summary?.lowPricePerSqft ?? null,
+    highPricePerSqft: summary?.highPricePerSqft ?? null,
+    averageDaysOnMarket: summary?.averageDaysOnMarket ?? null,
+    medianDaysOnMarket: summary?.medianDaysOnMarket ?? null,
+    lowDaysOnMarket: summary?.lowDaysOnMarket ?? null,
+    highDaysOnMarket: summary?.highDaysOnMarket ?? null,
+    saleCompCount: summary?.saleCompCount ?? reportData?.comps?.primary?.summary?.count ?? null,
+    askingPriceDelta: summary?.askingPriceDelta ?? null,
+    recommendedOfferLow: summary?.recommendedOfferLow ?? null,
+    recommendedOfferHigh: summary?.recommendedOfferHigh ?? null,
+    report: ai,
+    recentComps: comps,
+    reportData,
+    reportVersion: source.reportVersion || reportData?.masterReportVersion || 1,
   };
 };
 
@@ -104,9 +118,11 @@ exports.saveCompsReport = async (req, res) => {
       contextType,
       leadId,
       subject = {},
+      deal = {},
       filters = {},
       valuationContext = null,
       selectedComps = [],
+      reportData = null,
       title = "",
     } = req.body || {};
 
@@ -139,19 +155,23 @@ exports.saveCompsReport = async (req, res) => {
       }
     }
 
-    const summary = summarizeComps(subject, comps, valuationContext || null);
-    const aiReport = await generateAiReport(
-      subject,
-      summary,
-      comps,
-      valuationContext || null,
-      filters || null
-    ).catch((error) => {
-      console.error("Save comps report AI generation failed:", error.response?.data || error.message);
-      return null;
-    });
+    const summary = reportData?.summary || summarizeComps(subject, comps, valuationContext || null);
+    const aiReport =
+      reportData?.aiVerdict ||
+      (await generateAiReport(
+        subject,
+        summary,
+        comps,
+        valuationContext || null,
+        filters || null
+      ).catch((error) => {
+        console.error("Save comps report AI generation failed:", error.response?.data || error.message);
+        return null;
+      }));
 
     const generatedAt = new Date();
+    const normalizedReportData = reportData || null;
+    const normalizedDeal = deal || normalizedReportData?.dealInputs || null;
     const report = await PropertyReport.create({
       user: req.user.id,
       kind: "comps",
@@ -161,22 +181,36 @@ exports.saveCompsReport = async (req, res) => {
       address: subject.address,
       generatedAt,
       subjectSnapshot: subject,
+      dealSnapshot: normalizedDeal,
       filters,
       valuationContext: valuationContext || null,
       summary,
       ai: aiReport || null,
       comps,
+      reportData: normalizedReportData,
+      reportVersion: normalizedReportData?.masterReportVersion || 1,
     });
 
     if (lead) {
       lead.compsAnalysis = buildLegacyCompsAnalysisSnapshot({
         generatedAt,
         filters,
-        valuationContext: valuationContext || null,
-        summary,
-        aiReport,
-        comps,
-      });
+            valuationContext: valuationContext || null,
+            summary,
+            aiReport:
+              aiReport && aiReport.verdict
+                ? {
+                    headline: aiReport.headline,
+                    executiveSummary: aiReport.executiveSummary,
+                    pricingRecommendation: aiReport.valueTakeaway,
+                    offerStrategy: aiReport.dealTakeaway,
+                    confidence: aiReport.confidence,
+                    riskFlags: aiReport.riskFlags,
+                    nextSteps: aiReport.nextSteps,
+                  }
+                : aiReport,
+            comps,
+          });
       await lead.save();
     }
 

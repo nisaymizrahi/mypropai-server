@@ -8,6 +8,8 @@ const router = express.Router();
 
 router.use(requireAuth, requirePlatformManager);
 
+router.get('/support-requests', platformManagerController.getSupportRequests);
+router.patch('/support-requests/:requestId', platformManagerController.updateSupportRequestStatus);
 router.get('/users', platformManagerController.getUsers);
 router.get('/users/export', platformManagerController.exportUsers);
 router.get('/users/:userId', platformManagerController.getUserDetail);

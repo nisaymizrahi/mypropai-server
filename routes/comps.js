@@ -14,7 +14,9 @@ const {
   buildCompsAnalysis: buildSharedCompsAnalysis,
   generateAiReport: generateSharedAiReport,
 } = require("../utils/compsAnalysisService");
+const { buildMasterDealReport } = require("../utils/masterDealReportService");
 const { getFeatureAccessState, recordFeatureUsage } = require("../utils/billingAccess");
+const { consumeOneCompsCredit } = require("../utils/compsCredits");
 
 const router = express.Router();
 
@@ -957,7 +959,7 @@ router.get("/", async (req, res) => {
 
 router.post("/report", async (req, res) => {
   try {
-    const { subject: rawSubject = {}, ...rawFilters } = req.body || {};
+    const { subject: rawSubject = {}, filters: rawFilters = {}, deal: rawDeal = {}, ...legacyFilters } = req.body || {};
     const subjectInput = normalizeSubjectInput(rawSubject);
 
     if (!subjectInput.address) {
@@ -972,63 +974,45 @@ router.post("/report", async (req, res) => {
     if (!access.accessGranted) {
       return res.status(402).json({
         msg: access.hasActiveSubscription
-          ? "You have used all 10 included Pro comps reports for this month."
-          : "AI comps analysis requires Pro for standalone comps reports.",
+          ? "You are out of comps credits. Buy 10 more credits to keep going."
+          : "Standalone reports require available comps credits or Pro access.",
       });
     }
 
-    const preview = await getLeadPropertyPreview(subjectInput).catch(() => null);
-    const subject = mergeSubjectWithPreview(subjectInput, preview || {});
-    const compsAnalysis = await buildSharedCompsAnalysis(subject, rawFilters);
-
-    if (compsAnalysis.noResults) {
-      return res.status(200).json({
-        noResults: true,
-        msg: "No comparable properties matched the selected filters. Try widening the radius or relaxing the size filters.",
-        subject,
-        summary: null,
-        comps: [],
-        ai: null,
-        filters: compsAnalysis.analysisFilters,
-        valuationContext: compsAnalysis.valuationContext,
-        generatedAt: null,
-      });
-    }
-
-    const aiReport = await generateSharedAiReport(
-      subject,
-      compsAnalysis.summary,
-      compsAnalysis.rankedComps,
-      compsAnalysis.valuationContext,
-      compsAnalysis.analysisFilters
-    ).catch((error) => {
-      console.error("Standalone AI report generation failed:", error.response?.data || error.message);
-      return null;
+    const filters = Object.keys(rawFilters || {}).length ? rawFilters : legacyFilters;
+    const masterReport = await buildMasterDealReport({
+      subject: subjectInput,
+      filters,
+      deal: rawDeal,
     });
 
-    if (access.accessSource === "subscription_included") {
+    if (
+      access.accessSource === "trial_credits" ||
+      access.accessSource === "subscription_included" ||
+      access.accessSource === "purchased_credits"
+    ) {
+      await consumeOneCompsCredit({
+        userId: req.user.id,
+        metadata: {
+          featureKey: "comps_report",
+          resourceType: "comps_report",
+          address: masterReport.subject.address,
+        },
+      });
       await recordFeatureUsage({
         userId: req.user.id,
         featureKey: "comps_report",
         resourceType: "comps_report",
-        source: "subscription_included",
+        source: access.accessSource,
         metadata: {
-          address: subject.address,
-          mode: "comps_report",
-          ...compsAnalysis.analysisFilters,
+          address: masterReport.subject.address,
+          mode: "master_deal_report",
+          ...masterReport.filters,
         },
       });
     }
 
-    res.json({
-      subject,
-      summary: compsAnalysis.summary,
-      comps: compsAnalysis.rankedComps,
-      ai: aiReport,
-      filters: compsAnalysis.analysisFilters,
-      valuationContext: compsAnalysis.valuationContext,
-      generatedAt: new Date(),
-    });
+    res.json(masterReport);
   } catch (error) {
     console.error("Standalone comps report error:", error.response?.data || error.message);
     res.status(500).json({ msg: "Server error during comps analysis." });
@@ -1037,7 +1021,7 @@ router.post("/report", async (req, res) => {
 
 router.post("/report/full", async (req, res) => {
   try {
-    const { subject: rawSubject = {}, ...rawFilters } = req.body || {};
+    const { subject: rawSubject = {}, filters: rawFilters = {}, deal: rawDeal = {}, ...legacyFilters } = req.body || {};
     const subjectInput = normalizeSubjectInput(rawSubject);
 
     if (!subjectInput.address) {
@@ -1052,145 +1036,45 @@ router.post("/report/full", async (req, res) => {
     if (!access.accessGranted) {
       return res.status(402).json({
         msg: access.hasActiveSubscription
-          ? "You have used all 10 included Pro comps reports for this month."
-          : "Full property analysis requires Pro for standalone property reports.",
+          ? "You are out of comps credits. Buy 10 more credits to keep going."
+          : "Full property analysis requires available comps credits or Pro access.",
       });
     }
 
-    const [propertyRecord, saleListingRecord, rentalListingRecord] = await Promise.all([
-      fetchRentCastProperty(subjectInput).catch((error) => {
-        console.error("RentCast property lookup failed:", error.response?.data || error.message);
-        return null;
-      }),
-      fetchRentCastSaleListing(subjectInput).catch((error) => {
-        console.error("RentCast sale listing lookup failed:", error.response?.data || error.message);
-        return null;
-      }),
-      fetchRentCastRentalListing(subjectInput).catch((error) => {
-        console.error("RentCast rental listing lookup failed:", error.response?.data || error.message);
-        return null;
-      }),
-    ]);
-
-    const preview = formatPropertyPreview(subjectInput, propertyRecord, saleListingRecord);
-    const subject = mergeSubjectWithPreview(subjectInput, preview || {});
-
-    const compsAnalysis = await buildSharedCompsAnalysis(subject, rawFilters);
-    const rentEstimateRecord = await fetchRentCastRentEstimate({
-      ...subject,
-      compCount: Math.max(compsAnalysis.analysisFilters.maxComps, 20),
-      maxRadius: compsAnalysis.analysisFilters.radius,
-      daysOld: Math.max(1, Math.round(compsAnalysis.analysisFilters.saleDateMonths * 30)),
-    }).catch((error) => {
-      console.error("RentCast rent estimate lookup failed:", error.response?.data || error.message);
-      return null;
+    const filters = Object.keys(rawFilters || {}).length ? rawFilters : legacyFilters;
+    const masterReport = await buildMasterDealReport({
+      subject: subjectInput,
+      filters,
+      deal: rawDeal,
     });
 
-    const overview = buildPropertyOverview(subject, propertyRecord, saleListingRecord);
-    const owner = normalizeOwnerSummary(propertyRecord || {});
-    const saleListing = normalizeListingSummary(saleListingRecord);
-    const rentalListing = normalizeListingSummary(rentalListingRecord);
-    const value = normalizeValueSummary(compsAnalysis.valuationContext);
-    const rent = normalizeRentSummary(rentEstimateRecord);
-    const features = buildFeatureEntries(propertyRecord || {});
-
-    const assessmentHistory = sortByYearDesc(
-      toArray(propertyRecord?.taxAssessments)
-        .map(normalizeTaxAssessment)
-        .filter((item) => Object.values(item).some(hasValue))
-    );
-    const history = sortByDateDesc(
-      toArray(propertyRecord?.history)
-        .map(normalizePropertyHistoryItem)
-        .filter((item) => Object.values(item).some(hasValue))
-    ).slice(0, 12);
-    const metrics = buildFinancialSnapshot({
-      subject,
-      saleListing,
-      valueSummary: value,
-      rentSummary: rent,
-      compsSummary: compsAnalysis.summary,
-    });
-
-    const aiPayload = {
-      subject,
-      overview,
-      owner,
-      saleListing,
-      rentalListing,
-      value,
-      rent,
-      metrics,
-      taxHistory: assessmentHistory.slice(0, 5),
-      history: history.slice(0, 8),
-      features,
-      compsSummary: {
-        noResults: compsAnalysis.noResults,
-        summary: compsAnalysis.summary,
-        filters: compsAnalysis.analysisFilters,
-        comps: compsAnalysis.rankedComps.slice(0, 5).map((comp) => ({
-          address: comp.address,
-          salePrice: comp.salePrice,
-          saleDate: comp.saleDate,
-          distance: comp.distance,
-          squareFootage: comp.squareFootage,
-          bedrooms: comp.bedrooms,
-          bathrooms: comp.bathrooms,
-        })),
-      },
-    };
-
-    const aiReport = await generateFullPropertyAiReport(aiPayload).catch((error) => {
-      console.error("Full property AI report generation failed:", error.response?.data || error.message);
-      return null;
-    });
-
-    if (access.accessSource === "subscription_included") {
+    if (
+      access.accessSource === "trial_credits" ||
+      access.accessSource === "subscription_included" ||
+      access.accessSource === "purchased_credits"
+    ) {
+      await consumeOneCompsCredit({
+        userId: req.user.id,
+        metadata: {
+          featureKey: "comps_report",
+          resourceType: "property_report",
+          address: masterReport.subject.address,
+        },
+      });
       await recordFeatureUsage({
         userId: req.user.id,
         featureKey: "comps_report",
         resourceType: "property_report",
-        source: "subscription_included",
+        source: access.accessSource,
         metadata: {
-          address: subject.address,
-          mode: "full_property_analysis",
-          ...compsAnalysis.analysisFilters,
+          address: masterReport.subject.address,
+          mode: "master_deal_report",
+          ...masterReport.filters,
         },
       });
     }
 
-    res.json({
-      subject,
-      overview,
-      metrics,
-      owner,
-      saleListing,
-      rentalListing,
-      taxes: {
-        latest: assessmentHistory[0] || null,
-        history: assessmentHistory,
-      },
-      history,
-      features,
-      value,
-      rent,
-      compsSummary: {
-        noResults: compsAnalysis.noResults,
-        summary: compsAnalysis.summary,
-        comps: compsAnalysis.rankedComps,
-        filters: compsAnalysis.analysisFilters,
-      },
-      ai: aiReport,
-      sources: buildSourceSummary({
-        propertyRecord,
-        saleListing: saleListingRecord,
-        rentalListing: rentalListingRecord,
-        valueSummary: value,
-        rentSummary: rent,
-        aiReport,
-      }),
-      generatedAt: new Date(),
-    });
+    res.json(masterReport);
   } catch (error) {
     console.error("Standalone full property report error:", error.response?.data || error.message);
     res.status(500).json({ msg: "Server error during property analysis." });

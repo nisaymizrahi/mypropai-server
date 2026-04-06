@@ -53,6 +53,7 @@ const buildAuthUser = (user, options = {}) => {
     subscriptionStatus: subscriptionState.status,
     subscriptionCurrentPeriodEnd: subscriptionState.renewsAt,
     subscriptionSource: subscriptionState.source,
+    proTrialUsedAt: user.proTrialUsedAt || null,
     subscriptionOverride: overrideState.planKey,
     subscriptionOverrideExpiresAt: overrideState.expiresAt,
     subscriptionOverrideReason: overrideState.reason,

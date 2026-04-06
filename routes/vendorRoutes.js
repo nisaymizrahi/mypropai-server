@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const vendorController = require('../controllers/vendorController');
 const requireAuth = require('../middleware/requireAuth');
-const { uploadToCloudinary } = require('../middleware/upload');
+const { uploadDocumentToMemory } = require('../middleware/upload');
 
 // All routes in this file are protected
 router.use(requireAuth);
@@ -25,7 +25,7 @@ router.patch('/:id', vendorController.updateVendor);
 
 // @route   POST /api/vendors/:id/documents
 // @desc    Upload a vendor document
-router.post('/:id/documents', uploadToCloudinary.single('document'), vendorController.uploadVendorDocument);
+router.post('/:id/documents', uploadDocumentToMemory.single('document'), vendorController.uploadVendorDocument);
 
 // @route   DELETE /api/vendors/:id/documents/:documentId
 // @desc    Delete a vendor document

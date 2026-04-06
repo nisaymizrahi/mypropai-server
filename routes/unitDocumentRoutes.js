@@ -3,14 +3,14 @@
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/requireAuth');
-const { uploadToCloudinary } = require('../middleware/upload');
+const { uploadDocumentToMemory } = require('../middleware/upload');
 const controller = require('../controllers/unitDocumentController');
 
 // Upload to a specific unit
-router.post('/unit/:unitId', auth, uploadToCloudinary.single('document'), controller.uploadUnitDocument);
+router.post('/unit/:unitId', auth, uploadDocumentToMemory.single('document'), controller.uploadUnitDocument);
 
 // Upload to property-level (not tied to a unit)
-router.post('/property/:propertyId', auth, uploadToCloudinary.single('document'), controller.uploadPropertyDocument);
+router.post('/property/:propertyId', auth, uploadDocumentToMemory.single('document'), controller.uploadPropertyDocument);
 
 // Get documents for a single unit
 router.get('/unit/:unitId', auth, controller.getUnitDocuments);

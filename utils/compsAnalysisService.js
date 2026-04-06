@@ -260,6 +260,15 @@ const normalizeComparableSale = (comp = {}, fallbackIndex = 0) => ({
   listingType: comp.listingType || "",
   removedDate: comp.removedDate || null,
   daysOnMarket: numberOrNull(comp.daysOnMarket),
+  correlation: numberOrNull(comp.correlation),
+  rawDateSource: pickFirst(
+    comp.lastSaleDate ? "lastSaleDate" : null,
+    comp.saleDate ? "saleDate" : null,
+    comp.listedDate ? "listedDate" : null,
+    comp.lastSeenDate ? "lastSeenDate" : null,
+    comp.removedDate ? "removedDate" : null
+  ),
+  compDataSource: "rentcast_avm",
 });
 
 const sanitizeSelectedComparable = (comp = {}, fallbackIndex = 0) => {
@@ -535,6 +544,31 @@ const buildCompsAnalysis = async (subject, rawFilters = {}) => {
       noResults: true,
       analysisFilters,
       valuationContext,
+      rawComparableCount: toArray(avmValue?.comparables).length,
+      candidateComparableCount: 0,
+      subjectProperty: avmValue?.subjectProperty || null,
+      searchMeta: {
+        nativeFilters: {
+          propertyType: subject.propertyType || null,
+          bedrooms: numberOrNull(subject.bedrooms),
+          bathrooms: numberOrNull(subject.bathrooms),
+          squareFootage: numberOrNull(subject.squareFootage),
+          maxRadius: requestedRadius,
+          daysOld: Math.max(1, Math.round(requestedSaleDateMonths * 30)),
+          compCount: 25,
+        },
+        localFilters: {
+          propertyType: requestedPropertyType || activePropertyTypeFilter || null,
+          minSquareFootage: requestedMinSquareFootage,
+          maxSquareFootage: requestedMaxSquareFootage,
+          minLotSize: requestedMinLotSize,
+          maxLotSize: requestedMaxLotSize,
+          radius: requestedRadius,
+          freshnessMonths: requestedSaleDateMonths,
+        },
+        returnedDistanceRange: null,
+        candidateDistanceRange: null,
+      },
       rankedComps: [],
       summary: null,
     };
@@ -552,12 +586,59 @@ const buildCompsAnalysis = async (subject, rawFilters = {}) => {
     }))
     .sort((a, b) => a.relevanceScore - b.relevanceScore)
     .slice(0, requestedMaxComps)
-    .map(({ relevanceScore, ...comp }) => comp);
+    .map((comp) => ({
+      ...comp,
+      selectionReason: [
+        comp.distance !== null && comp.distance !== undefined ? `${comp.distance.toFixed(2)} mi away` : null,
+        comp.squareFootage && subject.squareFootage
+          ? `${Math.abs(comp.squareFootage - subject.squareFootage).toLocaleString()} sqft delta`
+          : null,
+        comp.correlation ? `AVM correlation ${comp.correlation.toFixed(3)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" | "),
+    }));
+
+  const returnedDistances = toArray(avmValue?.comparables)
+    .map((comp) => numberOrNull(comp?.distance))
+    .filter((value) => value !== null);
+  const candidateDistances = marketComps
+    .map((comp) => numberOrNull(comp?.distance))
+    .filter((value) => value !== null);
 
   return {
     noResults: false,
     analysisFilters,
     valuationContext,
+    rawComparableCount: toArray(avmValue?.comparables).length,
+    candidateComparableCount: marketComps.length,
+    subjectProperty: avmValue?.subjectProperty || null,
+    searchMeta: {
+      nativeFilters: {
+        propertyType: subject.propertyType || null,
+        bedrooms: numberOrNull(subject.bedrooms),
+        bathrooms: numberOrNull(subject.bathrooms),
+        squareFootage: numberOrNull(subject.squareFootage),
+        maxRadius: requestedRadius,
+        daysOld: Math.max(1, Math.round(requestedSaleDateMonths * 30)),
+        compCount: 25,
+      },
+      localFilters: {
+        propertyType: requestedPropertyType || activePropertyTypeFilter || null,
+        minSquareFootage: requestedMinSquareFootage,
+        maxSquareFootage: requestedMaxSquareFootage,
+        minLotSize: requestedMinLotSize,
+        maxLotSize: requestedMaxLotSize,
+        radius: requestedRadius,
+        freshnessMonths: requestedSaleDateMonths,
+      },
+      returnedDistanceRange: returnedDistances.length
+        ? { min: Math.min(...returnedDistances), max: Math.max(...returnedDistances) }
+        : null,
+      candidateDistanceRange: candidateDistances.length
+        ? { min: Math.min(...candidateDistances), max: Math.max(...candidateDistances) }
+        : null,
+    },
     rankedComps,
     summary: summarizeComps(subject, rankedComps, valuationContext),
   };
@@ -617,6 +698,14 @@ const buildLegacyCompsAnalysisSnapshot = ({
       listingType: comp.listingType,
       removedDate: comp.removedDate,
       daysOnMarket: comp.daysOnMarket,
+      correlation: comp.correlation,
+      rawDateSource: comp.rawDateSource,
+      compDataSource: comp.compDataSource,
+      relevanceScore:
+        comp.relevanceScore !== null && comp.relevanceScore !== undefined
+          ? Number(comp.relevanceScore.toFixed(3))
+          : null,
+      selectionReason: comp.selectionReason,
     })),
 });
 

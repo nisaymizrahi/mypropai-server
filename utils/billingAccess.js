@@ -1,6 +1,7 @@
 const FeatureUsage = require('../models/FeatureUsage');
 const Purchase = require('../models/Purchase');
 const { FEATURE_RULES, ONE_TIME_PRODUCTS, SUBSCRIPTION_PLANS } = require('../config/billingCatalog');
+const { getCompsCreditBalance } = require('./compsCredits');
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing']);
 
@@ -161,6 +162,67 @@ const getFeatureAccessState = async ({ user, featureKey, resourceId }) => {
       subscriptionState.isActive &&
       subscriptionState.planKey === rule.subscriptionPlan
   );
+
+  if (featureKey === 'comps_report') {
+    const balance = await getCompsCreditBalance(user._id);
+
+    let matchingPurchase = null;
+    if (resourceId) {
+      matchingPurchase = await Purchase.findOne({
+        user: user._id,
+        kind: 'comps_report',
+        resourceId,
+        status: 'paid',
+      }).sort({ createdAt: -1 });
+    }
+
+    let accessSource = null;
+    if (balance.trialRemaining > 0) {
+      accessSource = 'trial_credits';
+    } else if (balance.monthlyIncludedRemaining > 0) {
+      accessSource = 'subscription_included';
+    } else if (balance.purchasedRemaining > 0) {
+      accessSource = 'purchased_credits';
+    } else if (matchingPurchase) {
+      accessSource = 'one_time_purchase';
+    }
+
+    return {
+      featureKey,
+      hasActiveSubscription,
+      hasUnusedPurchase: Boolean(matchingPurchase),
+      accessGranted: balance.totalRemaining > 0 || Boolean(matchingPurchase),
+      accessSource,
+      planKey: getCurrentPlan(user).key,
+      purchase: matchingPurchase,
+      monthlyIncludedLimit: subscriptionState.status === 'trialing'
+        ? rule.subscriptionTrialIncludedQuantity || 0
+        : hasActiveSubscription
+          ? rule.subscriptionMonthlyIncludedQuantity || 0
+          : 0,
+      monthlyIncludedUsedCount: Math.max(
+        (
+          subscriptionState.status === 'trialing'
+            ? rule.subscriptionTrialIncludedQuantity || 0
+            : hasActiveSubscription
+              ? rule.subscriptionMonthlyIncludedQuantity || 0
+              : 0
+        ) - (subscriptionState.status === 'trialing' ? balance.trialRemaining : balance.monthlyIncludedRemaining),
+        0
+      ),
+      monthlyIncludedRemainingCount:
+        subscriptionState.status === 'trialing' ? balance.trialRemaining : balance.monthlyIncludedRemaining,
+      monthlyIncludedResetsAt:
+        subscriptionState.status === 'trialing' ? balance.trialExpiresAt : balance.monthlyExpiresAt,
+      hasIncludedUsageRemaining: balance.trialRemaining > 0 || balance.monthlyIncludedRemaining > 0,
+      totalCreditsRemaining: balance.totalRemaining,
+      trialCreditsRemaining: balance.trialRemaining,
+      trialCreditsExpiresAt: balance.trialExpiresAt,
+      purchasedCreditsRemaining: balance.purchasedRemaining,
+      purchasedCreditsNeverExpire: true,
+      nextCreditExpirationAt: balance.nextExpiringAt,
+    };
+  }
 
   const monthlyIncludedLimit = hasActiveSubscription
     ? rule.subscriptionMonthlyIncludedQuantity || 0

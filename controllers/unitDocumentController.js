@@ -3,7 +3,15 @@
 const Unit = require('../models/Unit');
 const ManagedProperty = require('../models/ManagedProperty');
 const UnitDocument = require('../models/UnitDocument');
-const cloudinary = require('cloudinary').v2;
+const DocumentAsset = require('../models/DocumentAsset');
+const {
+  createDocumentAsset,
+  deleteCloudinaryAsset,
+  DocumentStorageError,
+  markDocumentAssetLinked,
+  releaseUsage,
+  rollbackDocumentAssetCreation,
+} = require('../utils/documentStorageService');
 
 // Upload document to a specific unit
 exports.uploadUnitDocument = async (req, res) => {
@@ -20,17 +28,63 @@ exports.uploadUnitDocument = async (req, res) => {
       return res.status(403).json({ msg: 'Unauthorized' });
     }
 
-    const newDoc = new UnitDocument({
-      unit: unitId,
-      uploadedBy: req.user.id,
+    const { asset } = await createDocumentAsset({
+      user: req.user,
+      file: req.file,
       displayName,
-      fileUrl: req.file.path,
-      cloudinaryId: req.file.filename,
+      source: 'managed_document',
+      documentCategory: 'Unit',
+      relatedEntityType: 'unit',
+      relatedEntityId: unitId,
+      relatedRefs: {
+        managedProperty: unit.property?._id || unit.property,
+        unit: unit._id,
+      },
     });
 
-    await newDoc.save();
+    const newDoc = new UnitDocument({
+      unit: unitId,
+      property: unit.property?._id || unit.property,
+      uploadedBy: req.user.id,
+      ownerAccount: req.user.id,
+      displayName,
+      documentAsset: asset._id,
+      fileUrl: asset.secureUrl,
+      cloudinaryId: asset.publicId,
+      secureUrl: asset.secureUrl,
+      cloudinaryAssetId: asset.assetId,
+      resourceType: asset.resourceType,
+      deliveryType: asset.deliveryType,
+      fileBytes: asset.bytes,
+      originalFilename: asset.originalFilename,
+      mimeType: asset.mimeType,
+      cloudinaryVersion: asset.version,
+      cloudinaryFormat: asset.format,
+    });
+
+    try {
+      await newDoc.save();
+    } catch (saveError) {
+      await rollbackDocumentAssetCreation({
+        assetId: asset._id,
+        userId: req.user.id,
+        bytes: asset.bytes,
+      }).catch(() => null);
+      throw saveError;
+    }
+
+    await markDocumentAssetLinked({
+      assetId: asset._id,
+      sourceRecordId: newDoc._id,
+    }).catch((linkError) => {
+      console.error('Unit document asset link update failed:', linkError);
+    });
+
     res.status(201).json(newDoc);
   } catch (err) {
+    if (err instanceof DocumentStorageError) {
+      return res.status(err.status).json({ msg: err.message, code: err.code });
+    }
     console.error('Upload Unit Document Error:', err);
     res.status(500).json({ msg: 'Server error uploading unit document' });
   }
@@ -51,18 +105,62 @@ exports.uploadPropertyDocument = async (req, res) => {
       return res.status(403).json({ msg: 'Unauthorized' });
     }
 
+    const { asset } = await createDocumentAsset({
+      user: req.user,
+      file: req.file,
+      displayName,
+      source: 'managed_document',
+      documentCategory: 'Property',
+      relatedEntityType: 'managed_property',
+      relatedEntityId: propertyId,
+      relatedRefs: {
+        managedProperty: property._id,
+      },
+    });
+
     const newDoc = new UnitDocument({
       unit: null,
       uploadedBy: req.user.id,
+      ownerAccount: req.user.id,
       displayName,
-      fileUrl: req.file.path,
-      cloudinaryId: req.file.filename,
+      documentAsset: asset._id,
+      fileUrl: asset.secureUrl,
+      cloudinaryId: asset.publicId,
+      secureUrl: asset.secureUrl,
+      cloudinaryAssetId: asset.assetId,
+      resourceType: asset.resourceType,
+      deliveryType: asset.deliveryType,
+      fileBytes: asset.bytes,
+      originalFilename: asset.originalFilename,
+      mimeType: asset.mimeType,
+      cloudinaryVersion: asset.version,
+      cloudinaryFormat: asset.format,
       property: propertyId
     });
 
-    await newDoc.save();
+    try {
+      await newDoc.save();
+    } catch (saveError) {
+      await rollbackDocumentAssetCreation({
+        assetId: asset._id,
+        userId: req.user.id,
+        bytes: asset.bytes,
+      }).catch(() => null);
+      throw saveError;
+    }
+
+    await markDocumentAssetLinked({
+      assetId: asset._id,
+      sourceRecordId: newDoc._id,
+    }).catch((linkError) => {
+      console.error('Property document asset link update failed:', linkError);
+    });
+
     res.status(201).json(newDoc);
   } catch (err) {
+    if (err instanceof DocumentStorageError) {
+      return res.status(err.status).json({ msg: err.message, code: err.code });
+    }
     console.error('Upload Property Document Error:', err);
     res.status(500).json({ msg: 'Server error uploading property document' });
   }
@@ -136,13 +234,35 @@ exports.deleteDocument = async (req, res) => {
       return res.status(403).json({ msg: 'Unauthorized' });
     }
 
-    if (doc.cloudinaryId) {
-      await cloudinary.uploader.destroy(doc.cloudinaryId);
+    const asset = doc.documentAsset ? await DocumentAsset.findById(doc.documentAsset) : null;
+
+    if (doc.cloudinaryId || asset?.publicId) {
+      await deleteCloudinaryAsset({
+        publicId: asset?.publicId || doc.cloudinaryId,
+        resourceType: asset?.resourceType || doc.resourceType || 'raw',
+        deliveryType: asset?.deliveryType || doc.deliveryType || 'authenticated',
+      });
     }
 
     await doc.deleteOne();
+    if (asset) {
+      await DocumentAsset.deleteOne({ _id: asset._id });
+      await releaseUsage({
+        userId: doc.ownerAccount || doc.uploadedBy,
+        bytes: asset.bytes,
+      });
+    } else if (doc.fileBytes) {
+      await releaseUsage({
+        userId: doc.ownerAccount || doc.uploadedBy,
+        bytes: doc.fileBytes,
+      });
+    }
+
     res.json({ msg: 'Document deleted successfully' });
   } catch (err) {
+    if (err instanceof DocumentStorageError) {
+      return res.status(err.status).json({ msg: err.message, code: err.code });
+    }
     console.error('Delete Document Error:', err);
     res.status(500).json({ msg: 'Server error deleting document' });
   }

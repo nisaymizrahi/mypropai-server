@@ -18,6 +18,14 @@ const ESTIMATE_ALLOWED_MIME_TYPES = new Set([
   'image/png',
 ]);
 
+const DOCUMENT_ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+]);
+
 const buildFileFilter = (allowedMimeTypes) => (req, file, cb) => {
   if (!allowedMimeTypes.has(file.mimetype)) {
     return cb(new Error('Unsupported file type.'));
@@ -57,6 +65,11 @@ module.exports = {
     storage: memoryStorage,
     limits: { fileSize: 5 * 1024 * 1024 },
     fileFilter: buildFileFilter(ESTIMATE_ALLOWED_MIME_TYPES),
+  }),
+  uploadDocumentToMemory: multer({
+    storage: memoryStorage,
+    limits: { fileSize: 50 * 1024 * 1024 },
+    fileFilter: buildFileFilter(DOCUMENT_ALLOWED_MIME_TYPES),
   }),
   uploadBidEstimate: multer({
     storage: cloudinaryStorage,

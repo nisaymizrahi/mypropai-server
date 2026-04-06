@@ -21,7 +21,13 @@ const FeatureUsageSchema = new mongoose.Schema(
     },
     source: {
       type: String,
-      enum: ['subscription_included', 'one_time_purchase', 'subscription_unlimited'],
+      enum: [
+        'subscription_included',
+        'one_time_purchase',
+        'subscription_unlimited',
+        'trial_credits',
+        'purchased_credits',
+      ],
       required: true,
     },
     occurredAt: {

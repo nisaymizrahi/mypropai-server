@@ -1,6 +1,14 @@
 const ProjectDocument = require('../models/ProjectDocument');
 const Investment = require('../models/Investment');
-const cloudinary = require('cloudinary').v2;
+const DocumentAsset = require('../models/DocumentAsset');
+const {
+    createDocumentAsset,
+    deleteCloudinaryAsset,
+    DocumentStorageError,
+    markDocumentAssetLinked,
+    releaseUsage,
+    rollbackDocumentAssetCreation,
+} = require('../utils/documentStorageService');
 
 const LEGACY_PRIMARY_FUNDING_SOURCE_ID = 'legacy-primary-funding-source';
 
@@ -103,21 +111,65 @@ exports.uploadDocument = async (req, res) => {
             return res.status(400).json({ msg: financeLink.error });
         }
 
+        const { asset } = await createDocumentAsset({
+            user: req.user,
+            file: req.file,
+            displayName,
+            source: 'project_document',
+            documentCategory: category || 'General',
+            relatedEntityType: 'investment',
+            relatedEntityId: investmentId,
+            relatedRefs: {
+                investment: investmentId,
+            },
+        });
+
         const newDocument = new ProjectDocument({
             investment: investmentId,
             user: req.user.id,
+            ownerAccount: req.user.id,
             displayName,
             category,
             fundingSourceId: financeLink.fundingSourceId,
             drawRequestId: financeLink.drawRequestId,
-            fileUrl: req.file.path,
-            cloudinaryId: req.file.filename,
+            documentAsset: asset._id,
+            fileUrl: asset.secureUrl,
+            cloudinaryId: asset.publicId,
+            secureUrl: asset.secureUrl,
+            cloudinaryAssetId: asset.assetId,
+            resourceType: asset.resourceType,
+            deliveryType: asset.deliveryType,
+            fileBytes: asset.bytes,
+            originalFilename: asset.originalFilename,
+            mimeType: asset.mimeType,
+            cloudinaryVersion: asset.version,
+            cloudinaryFormat: asset.format,
         });
 
-        await newDocument.save();
+        try {
+            await newDocument.save();
+        } catch (saveError) {
+            await rollbackDocumentAssetCreation({
+                assetId: asset._id,
+                userId: req.user.id,
+                bytes: asset.bytes,
+            }).catch(() => null);
+            throw saveError;
+        }
+
+        await markDocumentAssetLinked({
+            assetId: asset._id,
+            sourceRecordId: newDocument._id,
+        }).catch((linkError) => {
+            console.error('Project document asset link update failed:', linkError);
+        });
+
         res.status(201).json(newDocument);
 
     } catch (error) {
+        if (error instanceof DocumentStorageError) {
+            return res.status(error.status).json({ msg: error.message, code: error.code });
+        }
         console.error('Error uploading document:', error);
         res.status(500).json({ msg: 'Server Error' });
     }
@@ -156,16 +208,37 @@ exports.deleteDocument = async (req, res) => {
         if (document.user.toString() !== req.user.id) {
             return res.status(401).json({ msg: 'User not authorized.' });
         }
-        
-        // Delete the file from Cloudinary first
-        await cloudinary.uploader.destroy(document.cloudinaryId);
-        
-        // Then delete the record from the database
+
+        const asset = document.documentAsset
+            ? await DocumentAsset.findById(document.documentAsset)
+            : null;
+
+        await deleteCloudinaryAsset({
+            publicId: asset?.publicId || document.cloudinaryId,
+            resourceType: asset?.resourceType || document.resourceType || 'raw',
+            deliveryType: asset?.deliveryType || document.deliveryType || 'authenticated',
+        });
+
         await document.deleteOne();
+        if (asset) {
+            await DocumentAsset.deleteOne({ _id: asset._id });
+            await releaseUsage({
+                userId: document.ownerAccount || document.user,
+                bytes: asset.bytes,
+            });
+        } else if (document.fileBytes) {
+            await releaseUsage({
+                userId: document.ownerAccount || document.user,
+                bytes: document.fileBytes,
+            });
+        }
 
         res.json({ msg: 'Document removed successfully.' });
 
     } catch (error) {
+        if (error instanceof DocumentStorageError) {
+            return res.status(error.status).json({ msg: error.message, code: error.code });
+        }
         console.error('Error deleting document:', error);
         res.status(500).json({ msg: 'Server Error' });
     }

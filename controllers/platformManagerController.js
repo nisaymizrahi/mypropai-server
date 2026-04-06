@@ -13,6 +13,7 @@ const PlatformAuditLog = require('../models/PlatformAuditLog');
 const PlatformSupportNote = require('../models/PlatformSupportNote');
 const ProjectDocument = require('../models/ProjectDocument');
 const Purchase = require('../models/Purchase');
+const SupportRequest = require('../models/SupportRequest');
 const Tenant = require('../models/Tenant');
 const User = require('../models/User');
 const Vendor = require('../models/Vendor');
@@ -24,6 +25,7 @@ const {
   getPlatformOverrideState,
 } = require('../utils/billingAccess');
 const { createAuthSessionToken } = require('../utils/authSessionService');
+const { buildOpsSummaryForUser } = require('../utils/documentStorageService');
 const { issuePasswordResetForUser } = require('./authController');
 const { getStripeClient } = require('../lib/stripe');
 const { normalizeEmail } = require('../utils/platformAccess');
@@ -41,6 +43,7 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const BILLING_ISSUE_STATUSES = new Set(['past_due', 'unpaid', 'incomplete']);
 const SUBSCRIPTION_DEACTIVATED_STATUSES = new Set(['canceled', 'incomplete_expired', 'unpaid']);
 const HIGH_USAGE_THRESHOLD = 10;
+const SUPPORT_REQUEST_STATUSES = new Set(['new', 'in_progress', 'resolved']);
 
 const USER_RELATED_MODELS = [
   { key: 'leads', model: Lead },
@@ -290,6 +293,38 @@ const serializeSupportNote = (note) => ({
   updatedAt: note.updatedAt,
 });
 
+const buildSupportRequestReferenceCode = (requestId) =>
+  `SUP-${String(requestId).slice(-6).toUpperCase()}`;
+
+const serializeSupportRequest = (request, matchedUser = null) => ({
+  id: request._id,
+  referenceCode: buildSupportRequestReferenceCode(request._id),
+  name: request.name,
+  email: request.email,
+  companyName: request.companyName || '',
+  requestType: request.requestType,
+  subject: request.subject,
+  message: request.message,
+  pageUrl: request.pageUrl || '',
+  source: request.source || 'website_help_center',
+  status: request.status || 'new',
+  notifiedAt: request.notifiedAt || null,
+  notificationRecipients: Array.isArray(request.notificationRecipients)
+    ? request.notificationRecipients
+    : [],
+  createdAt: request.createdAt,
+  updatedAt: request.updatedAt,
+  matchedUser: matchedUser
+    ? {
+        id: matchedUser._id,
+        name: buildDisplayName(matchedUser),
+        email: matchedUser.email,
+        accountStatus: matchedUser.accountStatus || 'active',
+        subscriptionPlan: getEffectiveSubscriptionState(matchedUser).planKey,
+      }
+    : null,
+});
+
 const serializeSession = (session, currentSessionId) => {
   const now = Date.now();
   const expiresAt = session.expiresAt ? new Date(session.expiresAt) : null;
@@ -459,6 +494,26 @@ const getUserOr404 = async (userId) => {
   return user || null;
 };
 
+const buildSupportRequestUserLookup = async (supportRequests = []) => {
+  const emails = [
+    ...new Set(
+      supportRequests
+        .map((request) => normalizeEmail(request?.email || ''))
+        .filter(Boolean)
+    ),
+  ];
+
+  if (!emails.length) {
+    return new Map();
+  }
+
+  const users = await User.find({ email: { $in: emails } }).select(
+    'name firstName lastName email accountStatus subscriptionPlan subscriptionStatus subscriptionSource platformSubscriptionOverride platformSubscriptionOverrideExpiresAt platformSubscriptionOverrideReason'
+  );
+
+  return new Map(users.map((user) => [normalizeEmail(user.email), user]));
+};
+
 const requireActionableUser = async (req, res) => {
   const targetUser = await getUserOr404(req.params.userId);
   if (!targetUser) {
@@ -525,7 +580,7 @@ const syncStripeStateForUser = async (user) => {
 };
 
 const buildUserDetailPayload = async (targetUser, currentPlatformManagerId, currentSessionId = null) => {
-  const [counts, sessions, supportNotes, auditLogs, usage, stripeContext] = await Promise.all([
+  const [counts, sessions, supportNotes, auditLogs, usage, stripeContext, documentStorage] = await Promise.all([
     buildUserCounts(targetUser._id),
     AuthSession.find({ user: targetUser._id })
       .sort({ lastActivityAt: -1, createdAt: -1 })
@@ -534,6 +589,7 @@ const buildUserDetailPayload = async (targetUser, currentPlatformManagerId, curr
     PlatformAuditLog.find({ targetUser: targetUser._id }).sort({ createdAt: -1 }).limit(30),
     buildUsageSummary(targetUser._id),
     fetchStripeBillingContext(targetUser),
+    buildOpsSummaryForUser(targetUser),
   ]);
 
   const activeSessions = sessions.filter(
@@ -575,6 +631,7 @@ const buildUserDetailPayload = async (targetUser, currentPlatformManagerId, curr
       invoices: stripeContext.invoices,
     },
     usage,
+    documentStorage,
     sessions: sessions.map((session) => serializeSession(session, currentSessionId)),
     supportNotes: supportNotes.map(serializeSupportNote),
     auditLogs: auditLogs.map(serializeAuditLog),
@@ -678,6 +735,85 @@ exports.getUsers = async (req, res) => {
   } catch (error) {
     console.error('Platform manager list users error:', error);
     return res.status(500).json({ msg: 'Failed to load users.' });
+  }
+};
+
+exports.getSupportRequests = async (req, res) => {
+  try {
+    const query = String(req.query.q || '').trim();
+    const status = String(req.query.status || 'all').trim().toLowerCase();
+
+    if (status !== 'all' && !SUPPORT_REQUEST_STATUSES.has(status)) {
+      return res.status(400).json({ msg: 'Unsupported support request status.' });
+    }
+
+    const baseFilter = {};
+
+    if (query) {
+      const safeQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(safeQuery, 'i');
+      baseFilter.$or = [
+        { name: regex },
+        { email: regex },
+        { companyName: regex },
+        { subject: regex },
+        { message: regex },
+        { pageUrl: regex },
+      ];
+    }
+
+    const listFilter = {
+      ...baseFilter,
+      ...(status === 'all' ? {} : { status }),
+    };
+
+    const [requests, statsEntries] = await Promise.all([
+      SupportRequest.find(listFilter).sort({ createdAt: -1 }).limit(80),
+      SupportRequest.aggregate([
+        Object.keys(baseFilter).length ? { $match: baseFilter } : null,
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+          },
+        },
+      ].filter(Boolean)),
+    ]);
+
+    const userLookup = await buildSupportRequestUserLookup(requests);
+    const stats = {
+      total: 0,
+      new: 0,
+      inProgress: 0,
+      resolved: 0,
+    };
+
+    statsEntries.forEach((entry) => {
+      if (entry._id === 'new') {
+        stats.new = entry.count || 0;
+      }
+      if (entry._id === 'in_progress') {
+        stats.inProgress = entry.count || 0;
+      }
+      if (entry._id === 'resolved') {
+        stats.resolved = entry.count || 0;
+      }
+    });
+
+    stats.total = stats.new + stats.inProgress + stats.resolved;
+
+    return res.json({
+      stats,
+      requests: requests.map((request) =>
+        serializeSupportRequest(
+          request,
+          userLookup.get(normalizeEmail(request.email || '')) || null
+        )
+      ),
+    });
+  } catch (error) {
+    console.error('Platform manager list support requests error:', error);
+    return res.status(500).json({ msg: 'Failed to load support requests.' });
   }
 };
 
@@ -794,6 +930,60 @@ exports.exportUsers = async (req, res) => {
   } catch (error) {
     console.error('Platform manager export users error:', error);
     return res.status(500).json({ msg: 'Failed to export users.' });
+  }
+};
+
+exports.updateSupportRequestStatus = async (req, res) => {
+  try {
+    const supportRequest = await SupportRequest.findById(req.params.requestId);
+    if (!supportRequest) {
+      return res.status(404).json({ msg: 'Support request not found.' });
+    }
+
+    const status = String(req.body.status || '').trim().toLowerCase();
+    if (!SUPPORT_REQUEST_STATUSES.has(status)) {
+      return res.status(400).json({ msg: 'Unsupported support request status.' });
+    }
+
+    const previousStatus = supportRequest.status || 'new';
+    const reason = String(req.body.reason || '').trim();
+
+    supportRequest.status = status;
+    await supportRequest.save();
+
+    const matchedUser = await User.findOne({
+      email: normalizeEmail(supportRequest.email || ''),
+    }).select(
+      'name firstName lastName email accountStatus subscriptionPlan subscriptionStatus subscriptionSource platformSubscriptionOverride platformSubscriptionOverrideExpiresAt platformSubscriptionOverrideReason'
+    );
+
+    await recordAuditLog({
+      actorUser: req.user,
+      targetUser: matchedUser,
+      action: 'support_request_status_updated',
+      reason: reason || null,
+      metadata: {
+        requestId: supportRequest._id,
+        referenceCode: buildSupportRequestReferenceCode(supportRequest._id),
+        previousStatus,
+        nextStatus: status,
+        requestEmail: supportRequest.email,
+        requestSubject: supportRequest.subject,
+      },
+    });
+
+    return res.json({
+      message:
+        status === 'resolved'
+          ? 'Support request marked resolved.'
+          : status === 'in_progress'
+            ? 'Support request marked in progress.'
+            : 'Support request reopened.',
+      request: serializeSupportRequest(supportRequest, matchedUser),
+    });
+  } catch (error) {
+    console.error('Platform manager update support request error:', error);
+    return res.status(500).json({ msg: 'Failed to update support request.' });
   }
 };
 

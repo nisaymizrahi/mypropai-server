@@ -5,9 +5,13 @@
   "scripts": {
     "backfill:properties": "node scripts/backfill-property-links.js",
     "backfill:properties:dry": "node scripts/backfill-property-links.js --dry-run",
+    "backfill:document-storage": "node scripts/backfill-document-storage.js",
+    "billing:migrate-comps-purchases": "node scripts/migrate-comps-purchases-to-credits.js",
     "postinstall": "node scripts/verify-runtime.js",
+    "reconcile:document-storage": "node scripts/reconcile-document-storage.js",
     "report:property-links": "node scripts/report-property-links.js",
-    "start": "node index.js"
+    "start": "node index.js",
+    "test:document-storage": "node --test tests/documentStoragePolicy.test.js"
   },
   "dependencies": {
     "axios": "^1.10.0",

@@ -1,6 +1,14 @@
 const Vendor = require('../models/Vendor');
 const Expense = require('../models/Expense');
-const cloudinary = require('cloudinary').v2;
+const DocumentAsset = require('../models/DocumentAsset');
+const {
+    createDocumentAsset,
+    deleteCloudinaryAsset,
+    DocumentStorageError,
+    markDocumentAssetLinked,
+    releaseUsage,
+    rollbackDocumentAssetCreation,
+} = require('../utils/documentStorageService');
 
 const allowedStatuses = new Set(['active', 'preferred', 'not_assignable', 'inactive']);
 
@@ -202,17 +210,39 @@ exports.deleteVendor = async (req, res) => {
         // This prevents data issues and keeps historical expense records intact.
         await Expense.updateMany({ vendor: req.params.id }, { $set: { vendor: null } });
 
-        await Promise.all(
-            (vendor.documents || []).map((document) =>
-                cloudinary.uploader.destroy(document.cloudinaryId).catch(() => null)
-            )
-        );
+        for (const document of vendor.documents || []) {
+            const asset = document.documentAsset
+                ? await DocumentAsset.findById(document.documentAsset).catch(() => null)
+                : null;
+
+            await deleteCloudinaryAsset({
+                publicId: asset?.publicId || document.cloudinaryId,
+                resourceType: asset?.resourceType || document.resourceType || 'raw',
+                deliveryType: asset?.deliveryType || document.deliveryType || 'authenticated',
+            }).catch(() => null);
+
+            if (asset) {
+                await DocumentAsset.deleteOne({ _id: asset._id }).catch(() => null);
+                await releaseUsage({
+                    userId: asset.ownerAccount || vendor.user,
+                    bytes: asset.bytes,
+                }).catch(() => null);
+            } else if (document.fileBytes) {
+                await releaseUsage({
+                    userId: document.ownerAccount || vendor.user,
+                    bytes: document.fileBytes,
+                }).catch(() => null);
+            }
+        }
 
         await vendor.deleteOne();
 
         res.json({ msg: 'Vendor removed.' });
 
     } catch (error) {
+        if (error instanceof DocumentStorageError) {
+            return res.status(error.status).json({ msg: error.message, code: error.code });
+        }
         console.error('Error deleting vendor:', error);
         res.status(500).json({ msg: 'Server Error' });
     }
@@ -236,11 +266,35 @@ exports.uploadVendorDocument = async (req, res) => {
             return res.status(400).json({ msg: 'Document name is required.' });
         }
 
+        const { asset } = await createDocumentAsset({
+            user: req.user,
+            file: req.file,
+            displayName,
+            source: 'vendor_document',
+            documentCategory: normalizeOptionalString(req.body.category) || 'Other',
+            relatedEntityType: 'vendor',
+            relatedEntityId: req.params.id,
+            relatedRefs: {
+                vendor: vendor._id,
+            },
+        });
+
         const nextDocument = {
             displayName,
             category: normalizeOptionalString(req.body.category) || 'Other',
-            fileUrl: req.file.path,
-            cloudinaryId: req.file.filename,
+            fileUrl: asset.secureUrl,
+            cloudinaryId: asset.publicId,
+            documentAsset: asset._id,
+            ownerAccount: req.user.id,
+            secureUrl: asset.secureUrl,
+            cloudinaryAssetId: asset.assetId,
+            resourceType: asset.resourceType,
+            deliveryType: asset.deliveryType,
+            fileBytes: asset.bytes,
+            originalFilename: asset.originalFilename,
+            mimeType: asset.mimeType,
+            cloudinaryVersion: asset.version,
+            cloudinaryFormat: asset.format,
             issueDate: normalizeDate(req.body.issueDate),
             expiresAt: normalizeDate(req.body.expiresAt),
             notes: normalizeOptionalString(req.body.notes) || '',
@@ -271,9 +325,30 @@ exports.uploadVendorDocument = async (req, res) => {
             };
         }
 
-        await vendor.save();
+        try {
+            await vendor.save();
+        } catch (saveError) {
+            await rollbackDocumentAssetCreation({
+                assetId: asset._id,
+                userId: req.user.id,
+                bytes: asset.bytes,
+            }).catch(() => null);
+            throw saveError;
+        }
+
+        const createdDocument = vendor.documents[vendor.documents.length - 1];
+        await markDocumentAssetLinked({
+            assetId: asset._id,
+            sourceRecordId: createdDocument?._id,
+        }).catch((linkError) => {
+            console.error('Vendor document asset link update failed:', linkError);
+        });
+
         res.status(201).json(vendor);
     } catch (error) {
+        if (error instanceof DocumentStorageError) {
+            return res.status(error.status).json({ msg: error.message, code: error.code });
+        }
         console.error('Error uploading vendor document:', error);
         res.status(500).json({ msg: 'Server Error' });
     }
@@ -293,12 +368,35 @@ exports.deleteVendorDocument = async (req, res) => {
             return res.status(404).json({ msg: 'Document not found.' });
         }
 
-        await cloudinary.uploader.destroy(document.cloudinaryId).catch(() => null);
+        const asset = document.documentAsset
+            ? await DocumentAsset.findById(document.documentAsset).catch(() => null)
+            : null;
+
+        await deleteCloudinaryAsset({
+            publicId: asset?.publicId || document.cloudinaryId,
+            resourceType: asset?.resourceType || document.resourceType || 'raw',
+            deliveryType: asset?.deliveryType || document.deliveryType || 'authenticated',
+        }).catch(() => null);
         document.deleteOne();
         await vendor.save();
+        if (asset) {
+            await DocumentAsset.deleteOne({ _id: asset._id }).catch(() => null);
+            await releaseUsage({
+                userId: asset.ownerAccount || vendor.user,
+                bytes: asset.bytes,
+            }).catch(() => null);
+        } else if (document.fileBytes) {
+            await releaseUsage({
+                userId: document.ownerAccount || vendor.user,
+                bytes: document.fileBytes,
+            }).catch(() => null);
+        }
 
         res.json(vendor);
     } catch (error) {
+        if (error instanceof DocumentStorageError) {
+            return res.status(error.status).json({ msg: error.message, code: error.code });
+        }
         console.error('Error deleting vendor document:', error);
         res.status(500).json({ msg: 'Server Error' });
     }

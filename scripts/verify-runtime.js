@@ -19,6 +19,7 @@ const modelModules = [
   './models/Vendor',
   './models/ProjectTask',
   './models/ProjectDocument',
+  './models/DocumentAsset',
   './models/MaintenanceTicket',
   './models/Inspection',
   './models/Lead',
