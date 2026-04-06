@@ -7,6 +7,7 @@ const { FEATURE_RULES, ONE_TIME_PRODUCTS, SUBSCRIPTION_PLANS } = require('../con
 const { getStripeClient } = require('../lib/stripe');
 const { grantCompsCredits } = require('../utils/compsCredits');
 const { buildStorageOverview } = require('../utils/documentStorageService');
+const { applySubscriptionConsent } = require('../utils/userProfile');
 const {
   getEffectiveSubscriptionState,
   getCurrentPlan,
@@ -20,6 +21,7 @@ const DEFAULT_CURRENCY = 'usd';
 
 const SUBSCRIPTION_SYNC_STATUSES = new Set(['active', 'trialing', 'past_due', 'incomplete']);
 const SUBSCRIPTION_DEACTIVATED_STATUSES = new Set(['canceled', 'incomplete_expired', 'unpaid']);
+const SUBSCRIPTION_CHECKOUT_SOURCE_FALLBACK = 'subscription_checkout';
 
 const formatCatalogPlan = (plan) => ({
   key: plan.key,
@@ -45,11 +47,50 @@ const formatPurchase = (purchase) => ({
   createdAt: purchase.createdAt,
 });
 
+const formatSubscriptionOffer = (plan) => ({
+  key: plan.key,
+  name: plan.name,
+  monthlyPriceCents: plan.monthlyPriceCents,
+  trialPeriodDays: plan.trialPeriodDays || 0,
+  renewalInterval: 'month',
+});
+
 const sanitizeReturnPath = (value, fallback = '/account') => {
   const candidate = String(value || '').trim();
   if (!candidate.startsWith('/')) return fallback;
   if (candidate.startsWith('//')) return fallback;
   return candidate;
+};
+
+const validateSubscriptionConsent = (input = {}, { plan, isTrialEligible }) => {
+  if (input?.accepted !== true) {
+    throw Object.assign(new Error('You must accept the subscription terms before continuing.'), {
+      status: 400,
+    });
+  }
+
+  if (input?.autoRenewDisclosureAccepted !== true || input?.nonRefundableDisclosureAccepted !== true) {
+    throw Object.assign(
+      new Error('You must acknowledge the renewal and refund terms before continuing.'),
+      { status: 400 }
+    );
+  }
+
+  const acceptedAt = input?.acceptedAt ? new Date(input.acceptedAt) : new Date();
+  if (!Number.isFinite(acceptedAt.valueOf())) {
+    throw Object.assign(new Error('A valid subscription consent timestamp is required.'), {
+      status: 400,
+    });
+  }
+
+  return {
+    acceptedAt,
+    planKey: plan.key,
+    monthlyPriceCents: plan.monthlyPriceCents,
+    trialPeriodDays: isTrialEligible ? plan.trialPeriodDays || 0 : 0,
+    trialEligibleAtAcceptance: Boolean(isTrialEligible),
+    source: input?.source || SUBSCRIPTION_CHECKOUT_SOURCE_FALLBACK,
+  };
 };
 
 const isCompsCreditProduct = (product) => Boolean(product?.credits && product?.creditSourceType);
@@ -156,7 +197,7 @@ const resolvePurchaseTarget = async (userId, kind, resourceId, returnPath = null
     if (!application.feePaid) {
       return {
         status: 400,
-        message: 'The application fee must be paid before purchasing tenant screening.',
+        message: 'The application fee must be paid before purchasing this application-specific service.',
       };
     }
 
@@ -357,6 +398,19 @@ const syncSubscriptionFromCheckoutSession = async (session) => {
 
   if (!user) return null;
 
+  if (session.metadata?.subscriptionConsentAcceptedAt) {
+    applySubscriptionConsent(user, {
+      acceptedAt: session.metadata.subscriptionConsentAcceptedAt,
+      planKey: session.metadata?.planKey || subscription.metadata?.planKey || 'pro',
+      monthlyPriceCents:
+        session.metadata?.subscriptionMonthlyPriceCents || SUBSCRIPTION_PLANS.pro?.monthlyPriceCents,
+      trialPeriodDays: session.metadata?.subscriptionTrialPeriodDays || 0,
+      trialEligibleAtAcceptance: session.metadata?.subscriptionTrialEligible === 'true',
+      source: session.metadata?.subscriptionConsentSource || SUBSCRIPTION_CHECKOUT_SOURCE_FALLBACK,
+    });
+    await user.save();
+  }
+
   const syncedUser = await syncUserSubscription(user, subscription, session.metadata?.planKey);
   await grantTrialCreditsForSubscription({
     user: syncedUser,
@@ -529,6 +583,7 @@ exports.getResourceAccess = async (req, res) => {
       trialCreditsExpiresAt: access.trialCreditsExpiresAt || null,
       purchasedCreditsRemaining: access.purchasedCreditsRemaining || 0,
       nextCreditExpirationAt: access.nextCreditExpirationAt || null,
+      subscriptionOffer: formatSubscriptionOffer(SUBSCRIPTION_PLANS.pro),
     });
   } catch (error) {
     console.error('Billing access error:', error);
@@ -543,7 +598,7 @@ exports.createSubscriptionCheckoutSession = async (req, res) => {
       return res.status(503).json({ msg: 'Stripe is not configured on the server.' });
     }
 
-    const { planKey = 'pro' } = req.body || {};
+    const { planKey = 'pro', subscriptionConsent: rawSubscriptionConsent = null } = req.body || {};
     const plan = SUBSCRIPTION_PLANS[planKey];
 
     if (!plan || plan.key === 'free') {
@@ -560,6 +615,14 @@ exports.createSubscriptionCheckoutSession = async (req, res) => {
     }
 
     const isTrialEligible = !user.proTrialUsedAt;
+    const subscriptionConsent = validateSubscriptionConsent(rawSubscriptionConsent, {
+      plan,
+      isTrialEligible,
+    });
+
+    applySubscriptionConsent(user, subscriptionConsent);
+    await user.save();
+
     const customerId = await ensureStripeCustomer(user);
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
@@ -583,11 +646,18 @@ exports.createSubscriptionCheckoutSession = async (req, res) => {
         userId: user._id.toString(),
         planKey: plan.key,
         trialEligible: isTrialEligible ? 'true' : 'false',
+        subscriptionConsentAcceptedAt: subscriptionConsent.acceptedAt.toISOString(),
+        subscriptionConsentSource: subscriptionConsent.source,
+        subscriptionMonthlyPriceCents: String(plan.monthlyPriceCents),
+        subscriptionTrialEligible: isTrialEligible ? 'true' : 'false',
+        subscriptionTrialPeriodDays: String(isTrialEligible ? plan.trialPeriodDays || 0 : 0),
       },
       subscription_data: {
         metadata: {
           userId: user._id.toString(),
           planKey: plan.key,
+          subscriptionConsentAcceptedAt: subscriptionConsent.acceptedAt.toISOString(),
+          subscriptionConsentSource: subscriptionConsent.source,
         },
         ...(isTrialEligible && plan.trialPeriodDays
           ? {
@@ -600,7 +670,7 @@ exports.createSubscriptionCheckoutSession = async (req, res) => {
     res.json({ url: session.url });
   } catch (error) {
     console.error('Subscription checkout error:', error);
-    res.status(500).json({ msg: 'Failed to start subscription checkout.' });
+    res.status(error.status || 500).json({ msg: error.message || 'Failed to start subscription checkout.' });
   }
 };
 

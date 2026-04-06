@@ -1,7 +1,8 @@
 const LEGAL_VERSIONS = {
-  terms: '2026-03-16',
-  privacy: '2026-03-16',
-  marketing: '2026-03-16',
+  terms: '2026-04-05',
+  privacy: '2026-04-05',
+  marketing: '2026-04-05',
+  subscription: '2026-04-05',
 };
 
 const normalizeWhitespace = (value = '') => String(value || '').trim().replace(/\s+/g, ' ');
@@ -73,6 +74,12 @@ const buildConsentSummary = (user = {}) => ({
   marketingConsentAcceptedAt: user.marketingConsentAcceptedAt || null,
   marketingConsentRevokedAt: user.marketingConsentRevokedAt || null,
   marketingConsentVersion: user.marketingConsentVersion || null,
+  subscriptionAccepted: Boolean(
+    user.subscriptionConsent?.acceptedAt && user.subscriptionConsent?.version
+  ),
+  subscriptionAcceptedAt: user.subscriptionConsent?.acceptedAt || null,
+  subscriptionVersion: user.subscriptionConsent?.version || null,
+  subscriptionPlanKey: user.subscriptionConsent?.planKey || null,
 });
 
 const buildAuthProviders = (user = {}) => {
@@ -174,11 +181,52 @@ const applyMarketingConsent = (user, optedIn, now = new Date()) => {
   return user;
 };
 
+const applySubscriptionConsent = (
+  user,
+  {
+    acceptedAt = null,
+    planKey = 'pro',
+    monthlyPriceCents = null,
+    trialPeriodDays = 0,
+    trialEligibleAtAcceptance = false,
+    source = 'subscription_checkout',
+  } = {}
+) => {
+  if (!user) {
+    return user;
+  }
+
+  const parsedAcceptedAt = acceptedAt ? new Date(acceptedAt) : new Date();
+  const consentAcceptedAt = Number.isFinite(parsedAcceptedAt.valueOf()) ? parsedAcceptedAt : new Date();
+  const normalizedPrice = Number(monthlyPriceCents);
+  const normalizedTrialPeriodDays = Number(trialPeriodDays);
+
+  user.subscriptionConsent = {
+    acceptedAt: consentAcceptedAt,
+    version: LEGAL_VERSIONS.subscription,
+    termsVersion: LEGAL_VERSIONS.terms,
+    privacyVersion: LEGAL_VERSIONS.privacy,
+    planKey: planKey === 'pro' ? 'pro' : null,
+    monthlyPriceCents: Number.isFinite(normalizedPrice) ? Math.round(normalizedPrice) : null,
+    renewalInterval: 'month',
+    trialPeriodDays: Number.isFinite(normalizedTrialPeriodDays)
+      ? Math.max(0, Math.round(normalizedTrialPeriodDays))
+      : 0,
+    trialEligibleAtAcceptance: Boolean(trialEligibleAtAcceptance),
+    autoRenewDisclosureAccepted: true,
+    nonRefundableDisclosureAccepted: true,
+    source: normalizeOptionalString(source, 80) || 'subscription_checkout',
+  };
+
+  return user;
+};
+
 module.exports = {
   LEGAL_VERSIONS,
   applyMarketingConsent,
   applyProfileFields,
   applyRequiredLegalAcceptance,
+  applySubscriptionConsent,
   buildAuthProviders,
   buildConsentSummary,
   buildDisplayName,

@@ -7,7 +7,7 @@ const SUBSCRIPTION_PLANS = {
     features: [
       'Manage leads, applications, and property workflows',
       'View saved reports that were previously purchased or generated',
-      'Buy 10-credit comps packs and tenant screenings when needed',
+      'Buy 10-credit comps packs when needed',
     ],
   },
   pro: {
@@ -26,7 +26,7 @@ const SUBSCRIPTION_PLANS = {
       '50 comps credits included every paid billing cycle',
       'Buy unlimited 10-credit top-ups for $9',
       'AI investment report generation',
-      'Discounted tenant screening pricing',
+      'Discounted 10-credit top-up pricing',
       'Billing portal access and subscription management',
     ],
   },
@@ -56,17 +56,6 @@ const ONE_TIME_PRODUCTS = {
     creditSourceType: 'purchase_topup',
     requiresActiveSubscription: true,
   },
-  tenant_screening: {
-    key: 'tenant_screening',
-    name: 'Tenant Screening',
-    description: 'Unlock one tenant screening run for a specific application.',
-    currency: 'usd',
-    priceCents: 4500,
-    subscriberPriceCents: 3500,
-    stripePriceEnvVar: 'STRIPE_PRICE_TENANT_SCREENING',
-    subscriberStripePriceEnvVar: 'STRIPE_PRICE_TENANT_SCREENING_PRO',
-    resourceType: 'application',
-  },
 };
 
 const FEATURE_RULES = {
@@ -80,13 +69,6 @@ const FEATURE_RULES = {
     oneTimeProductKey: null,
     starterPackProductKey: 'comps_pack_10',
     proTopUpProductKey: 'pro_comps_topup_10',
-  },
-  tenant_screening: {
-    key: 'tenant_screening',
-    label: 'Tenant screening',
-    subscriptionPlan: null,
-    subscriptionGrantsAccess: false,
-    oneTimeProductKey: 'tenant_screening',
   },
   ai_investment_report: {
     key: 'ai_investment_report',

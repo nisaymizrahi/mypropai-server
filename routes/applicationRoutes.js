@@ -48,9 +48,5 @@ router.patch('/:id/status', requireAuth, applicationController.updateApplication
 // @desc    Create a Stripe payment intent for the application fee
 router.post('/:id/create-payment-intent', requireAuth, applicationController.createPaymentIntent);
 
-// @route   POST /api/applications/:id/initiate-screening
-// @desc    Initiates the tenant screening process
-router.post('/:id/initiate-screening', requireAuth, applicationController.initiateScreening);
-
 
 module.exports = router;

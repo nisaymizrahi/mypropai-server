@@ -4,13 +4,40 @@ const ManagedProperty = require('../models/ManagedProperty');
 const User = require('../models/User');
 const sendEmail = require('../utils/sendEmail');
 const { signJwt, verifyJwt } = require('../utils/jwtConfig');
-const { consumeMatchingPurchase, getFeatureAccessState } = require('../utils/billingAccess');
 const { APPLICATION_FEE_CENTS, getStripeClient } = require('../lib/stripe');
 
 const VALID_MANAGER_DECISIONS = new Set(['Approved', 'Denied']);
 const VALID_INVITE_SCOPES = new Set(['portfolio', 'property', 'unit']);
 const APPLICATION_INVITE_KIND = 'application_invite';
 const APPLICATION_INVITE_TTL = '365d';
+const FINAL_APPLICATION_STATUSES = new Set(['Approved', 'Denied', 'Withdrawn']);
+
+const normalizeApplicationStatus = (status, feePaid = false) => {
+  if (FINAL_APPLICATION_STATUSES.has(status)) {
+    return status;
+  }
+
+  return feePaid ? 'Under Review' : 'Pending Payment';
+};
+
+const normalizeApplicationForWrite = (application) => {
+  if (!application) {
+    return null;
+  }
+
+  application.status = normalizeApplicationStatus(application.status, application.feePaid);
+  return application;
+};
+
+const serializeApplication = (application) => {
+  const record = application?.toObject ? application.toObject() : application;
+
+  return {
+    ...record,
+    status: normalizeApplicationStatus(record?.status, record?.feePaid),
+  };
+};
+
 const resolveApplicationFeeCents = (owner) => {
   const feeCents = Number(owner?.applicationFeeCents);
 
@@ -27,7 +54,7 @@ const getAuthorizedApplication = async (applicationId, userId) => {
     return null;
   }
 
-  return application;
+  return normalizeApplicationForWrite(application);
 };
 
 const getFrontendBase = () => process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -307,7 +334,7 @@ const markApplicationPaidFromSession = async (session) => {
   if (!application.feePaid) {
     application.feePaid = true;
     application.feePaidAt = new Date();
-    application.status = 'Pending Screening';
+    application.status = 'Under Review';
   }
 
   application.stripePaymentIntentId =
@@ -458,9 +485,19 @@ exports.getPublicApplicationDetails = async (req, res) => {
 // @desc    Submit a new rental application
 exports.submitApplication = async (req, res) => {
   try {
-    const { inviteToken, unitId, applicantInfo, residenceHistory, employmentHistory } = req.body;
+    const {
+      inviteToken,
+      unitId,
+      applicantInfo,
+      residenceHistory,
+      employmentHistory,
+      applicantConsent,
+    } = req.body;
     if (!applicantInfo?.fullName || !applicantInfo?.email || !applicantInfo?.phone) {
       return res.status(400).json({ msg: 'Please complete the required application fields.' });
+    }
+    if (!applicantConsent?.acceptedAt) {
+      return res.status(400).json({ msg: 'You must accept the application terms before submitting.' });
     }
 
     const context = await resolvePublicApplicationContext({
@@ -478,6 +515,10 @@ exports.submitApplication = async (req, res) => {
       applicantInfo,
       residenceHistory,
       employmentHistory,
+      applicantConsent: {
+        acceptedAt: applicantConsent.acceptedAt,
+        legalVersion: applicantConsent.legalVersion || '',
+      },
     });
 
     await newApplication.save();
@@ -612,7 +653,7 @@ exports.getApplications = async (req, res) => {
       .populate('property', 'address')
       .sort({ createdAt: -1 });
 
-    res.json(applications);
+    res.json(applications.map(serializeApplication));
   } catch (error) {
     console.error('Error fetching applications:', error);
     res.status(500).json({ msg: 'Server Error' });
@@ -628,13 +669,15 @@ exports.getApplicationsForProperty = async (req, res) => {
 // @desc    Get a single application's full details
 exports.getApplicationById = async (req, res) => {
   try {
-    const application = await Application.findById(req.params.id)
+    const application = normalizeApplicationForWrite(
+      await Application.findById(req.params.id)
       .populate('unit', 'name')
-      .populate('property', 'address');
+      .populate('property', 'address')
+    );
     if (!application || application.user.toString() !== req.user.id) {
       return res.status(401).json({ msg: 'Application not found or user not authorized.' });
     }
-    res.json(application);
+    res.json(serializeApplication(application));
   } catch (error) {
     res.status(500).json({ msg: 'Server Error' });
   }
@@ -658,59 +701,7 @@ exports.updateApplicationStatus = async (req, res) => {
 
     application.status = status;
     await application.save();
-    res.json(application);
-  } catch (error) {
-    res.status(500).json({ msg: 'Server Error' });
-  }
-};
-
-// @desc    Initiates the tenant screening process
-exports.initiateScreening = async (req, res) => {
-  try {
-    const application = await getAuthorizedApplication(req.params.id, req.user.id);
-    if (!application) {
-      return res.status(401).json({ msg: 'Application not found or user not authorized.' });
-    }
-    if (!application.feePaid) {
-      return res
-        .status(400)
-        .json({ msg: 'Application fee must be paid before initiating screening.' });
-    }
-    if (application.status === 'Under Review') {
-      return res.json({ msg: 'Screening is already in progress.', application });
-    }
-    if (application.status !== 'Pending Screening') {
-      return res.status(400).json({ msg: 'This application is not ready for screening.' });
-    }
-
-    const access = await getFeatureAccessState({
-      user: req.user,
-      featureKey: 'tenant_screening',
-      resourceId: application._id,
-    });
-
-    if (!access.accessGranted) {
-      return res.status(402).json({
-        msg: 'Tenant screening requires a one-time screening purchase for this application.',
-        billing: {
-          featureKey: 'tenant_screening',
-          planKey: access.planKey,
-          hasUnusedPurchase: access.hasUnusedPurchase,
-        },
-      });
-    }
-
-    application.screeningReportId = `mock_report_${new Date().getTime()}`;
-    application.status = 'Under Review';
-    await application.save();
-
-    await consumeMatchingPurchase({
-      userId: req.user.id,
-      kind: 'tenant_screening',
-      resourceId: application._id,
-    });
-
-    res.json({ msg: 'Screening process initiated.', application });
+    res.json(serializeApplication(application));
   } catch (error) {
     res.status(500).json({ msg: 'Server Error' });
   }

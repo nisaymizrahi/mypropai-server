@@ -60,7 +60,7 @@ const ApplicationSchema = new mongoose.Schema({
   // Application status
   status: {
     type: String,
-    enum: ['Pending Payment', 'Pending Screening', 'Under Review', 'Approved', 'Denied', 'Withdrawn'],
+    enum: ['Pending Payment', 'Under Review', 'Approved', 'Denied', 'Withdrawn'],
     default: 'Pending Payment',
   },
   // A flag to indicate if the application fee has been paid
@@ -71,15 +71,20 @@ const ApplicationSchema = new mongoose.Schema({
   feePaidAt: {
     type: Date,
   },
+  applicantConsent: {
+    acceptedAt: {
+      type: Date,
+    },
+    legalVersion: {
+      type: String,
+      default: '',
+    },
+  },
   // Store the ID of the Stripe payment intent for reference
   stripePaymentIntentId: {
     type: String,
   },
   stripeCheckoutSessionId: {
-    type: String,
-  },
-  // Placeholder for the screening report ID from our partner service
-  screeningReportId: {
     type: String,
   }
 }, { timestamps: true });

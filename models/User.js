@@ -53,6 +53,57 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    subscriptionConsent: {
+      acceptedAt: {
+        type: Date,
+        default: null,
+      },
+      version: {
+        type: String,
+        default: null,
+      },
+      termsVersion: {
+        type: String,
+        default: null,
+      },
+      privacyVersion: {
+        type: String,
+        default: null,
+      },
+      planKey: {
+        type: String,
+        enum: ['pro', null],
+        default: null,
+      },
+      monthlyPriceCents: {
+        type: Number,
+        default: null,
+      },
+      renewalInterval: {
+        type: String,
+        default: null,
+      },
+      trialPeriodDays: {
+        type: Number,
+        default: 0,
+      },
+      trialEligibleAtAcceptance: {
+        type: Boolean,
+        default: false,
+      },
+      autoRenewDisclosureAccepted: {
+        type: Boolean,
+        default: false,
+      },
+      nonRefundableDisclosureAccepted: {
+        type: Boolean,
+        default: false,
+      },
+      source: {
+        type: String,
+        default: null,
+      },
+    },
     
     // --- ✅ NEW: Fields for Stripe Connect ---
     stripeAccountId: { 
