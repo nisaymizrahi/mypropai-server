@@ -1,12 +1,18 @@
 const CompsCreditGrant = require('../models/CompsCreditGrant');
 
-const PURCHASE_SOURCE_TYPES = new Set(['purchase_pack', 'purchase_topup', 'migration']);
+const PURCHASE_SOURCE_TYPES = new Set([
+  'purchase_pack',
+  'purchase_topup',
+  'migration',
+  'platform_manager_grant',
+]);
 const CREDIT_SOURCE_PRIORITY = {
   trial: 1,
   subscription_monthly: 2,
   purchase_pack: 3,
   purchase_topup: 3,
   migration: 3,
+  platform_manager_grant: 3,
 };
 
 const isGrantActive = (grant, now = new Date()) => {

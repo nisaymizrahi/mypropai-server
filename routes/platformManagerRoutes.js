@@ -17,6 +17,7 @@ router.post('/users/:userId/impersonate', platformManagerController.createImpers
 router.post('/users/:userId/revoke-sessions', platformManagerController.revokeUserSessions);
 router.post('/users/:userId/sync-billing', platformManagerController.syncUserBilling);
 router.post('/users/:userId/send-password-reset', platformManagerController.sendPasswordReset);
+router.post('/users/:userId/comps-credits', platformManagerController.grantUserCompsCredits);
 router.post('/users/:userId/support-notes', platformManagerController.addSupportNote);
 router.patch('/users/:userId/subscription-override', platformManagerController.setSubscriptionOverride);
 router.patch('/users/:userId/account-status', platformManagerController.setAccountStatus);

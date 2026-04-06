@@ -29,6 +29,7 @@ const { buildOpsSummaryForUser } = require('../utils/documentStorageService');
 const { issuePasswordResetForUser } = require('./authController');
 const { getStripeClient } = require('../lib/stripe');
 const { normalizeEmail } = require('../utils/platformAccess');
+const { getCompsCreditBalance, grantCompsCredits } = require('../utils/compsCredits');
 const {
   buildSupportRequestReferenceCode,
   buildSupportStatusUpdateEmail,
@@ -49,6 +50,14 @@ const BILLING_ISSUE_STATUSES = new Set(['past_due', 'unpaid', 'incomplete']);
 const SUBSCRIPTION_DEACTIVATED_STATUSES = new Set(['canceled', 'incomplete_expired', 'unpaid']);
 const HIGH_USAGE_THRESHOLD = 10;
 const SUPPORT_REQUEST_STATUSES = new Set(['new', 'in_progress', 'resolved']);
+const COMPS_CREDIT_SOURCE_LABELS = {
+  trial: 'Trial credits',
+  subscription_monthly: 'Cycle credits',
+  purchase_pack: 'Starter pack credits',
+  purchase_topup: 'Pro top-up credits',
+  migration: 'Migrated credits',
+  platform_manager_grant: 'Platform manager grant',
+};
 
 const USER_RELATED_MODELS = [
   { key: 'leads', model: Lead },
@@ -349,6 +358,43 @@ const serializeSession = (session, currentSessionId) => {
   };
 };
 
+const serializeCompsCreditGrant = (grant) => ({
+  id: String(grant._id),
+  sourceType: grant.sourceType,
+  sourceLabel:
+    COMPS_CREDIT_SOURCE_LABELS[grant.sourceType] || String(grant.sourceType || '').replace(/_/g, ' '),
+  totalCredits: Number(grant.totalCredits || 0),
+  remainingCredits: Number(grant.remainingCredits || 0),
+  expiresAt: grant.expiresAt || null,
+  cycleStart: grant.cycleStart || null,
+  cycleEnd: grant.cycleEnd || null,
+  createdAt: grant.createdAt || null,
+  updatedAt: grant.updatedAt || null,
+  reason: grant.metadata?.reason || null,
+  grantedByEmail: grant.metadata?.grantedByEmail || null,
+});
+
+const buildCompsCreditSummary = async (userId) => {
+  const balance = await getCompsCreditBalance(userId);
+  const activeGrants = Array.isArray(balance.grants)
+    ? [...balance.grants].sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
+    : [];
+
+  return {
+    totalRemaining: balance.totalRemaining || 0,
+    trialRemaining: balance.trialRemaining || 0,
+    monthlyIncludedRemaining: balance.monthlyIncludedRemaining || 0,
+    purchasedRemaining: balance.purchasedRemaining || 0,
+    platformGrantedRemaining: activeGrants
+      .filter((grant) => grant.sourceType === 'platform_manager_grant')
+      .reduce((sum, grant) => sum + Number(grant.remainingCredits || 0), 0),
+    trialExpiresAt: balance.trialExpiresAt || null,
+    monthlyExpiresAt: balance.monthlyExpiresAt || null,
+    nextExpiringAt: balance.nextExpiringAt || null,
+    activeGrants: activeGrants.map(serializeCompsCreditGrant),
+  };
+};
+
 const buildUsageSummary = async (userId) => {
   const { periodStart, nextPeriodStart } = getCurrentMonthWindow();
   const userObjectId = toObjectId(userId);
@@ -582,7 +628,8 @@ const syncStripeStateForUser = async (user) => {
 };
 
 const buildUserDetailPayload = async (targetUser, currentPlatformManagerId, currentSessionId = null) => {
-  const [counts, sessions, supportNotes, auditLogs, usage, stripeContext, documentStorage] = await Promise.all([
+  const [counts, sessions, supportNotes, auditLogs, usage, stripeContext, documentStorage, credits] =
+    await Promise.all([
     buildUserCounts(targetUser._id),
     AuthSession.find({ user: targetUser._id })
       .sort({ lastActivityAt: -1, createdAt: -1 })
@@ -592,6 +639,7 @@ const buildUserDetailPayload = async (targetUser, currentPlatformManagerId, curr
     buildUsageSummary(targetUser._id),
     fetchStripeBillingContext(targetUser),
     buildOpsSummaryForUser(targetUser),
+    buildCompsCreditSummary(targetUser._id),
   ]);
 
   const activeSessions = sessions.filter(
@@ -632,6 +680,7 @@ const buildUserDetailPayload = async (targetUser, currentPlatformManagerId, curr
       subscriptionDashboardUrl: stripeContext.links.subscriptionDashboardUrl,
       invoices: stripeContext.invoices,
     },
+    credits,
     usage,
     documentStorage,
     sessions: sessions.map((session) => serializeSession(session, currentSessionId)),
@@ -1375,6 +1424,61 @@ exports.updateUserEmail = async (req, res) => {
   } catch (error) {
     console.error('Platform manager update email error:', error);
     return res.status(500).json({ msg: 'Failed to update user email.' });
+  }
+};
+
+exports.grantUserCompsCredits = async (req, res) => {
+  try {
+    const targetUser = await requireActionableUser(req, res);
+    if (!targetUser) {
+      return;
+    }
+
+    const credits = Number(req.body.credits);
+    if (!Number.isInteger(credits) || credits <= 0) {
+      return res.status(400).json({ msg: 'Credits must be a whole number greater than zero.' });
+    }
+
+    if (credits > 1000) {
+      return res.status(400).json({ msg: 'Credits cannot exceed 1000 in a single grant.' });
+    }
+
+    const reason = String(req.body.reason || '').trim();
+    if (reason.length < 3) {
+      return res.status(400).json({ msg: 'Include a short reason for the credit grant.' });
+    }
+
+    const grant = await grantCompsCredits({
+      userId: targetUser._id,
+      sourceType: 'platform_manager_grant',
+      credits,
+      metadata: {
+        reason,
+        grantedByUserId: String(req.user._id || req.user.id || ''),
+        grantedByEmail: normalizeEmail(req.user.email || ''),
+      },
+    });
+
+    await recordAuditLog({
+      actorUser: req.user,
+      targetUser,
+      action: 'comps_credits_granted',
+      reason,
+      metadata: {
+        grantId: grant?._id || null,
+        credits,
+        sourceType: 'platform_manager_grant',
+      },
+    });
+
+    return res.status(201).json({
+      message: `${credits} comps credit${credits === 1 ? '' : 's'} granted.`,
+      credits: await buildCompsCreditSummary(targetUser._id),
+      user: await buildUserSummary(targetUser, req.user.id),
+    });
+  } catch (error) {
+    console.error('Platform manager grant comps credits error:', error);
+    return res.status(500).json({ msg: 'Failed to grant comps credits.' });
   }
 };
 

@@ -10,7 +10,14 @@ const CompsCreditGrantSchema = new mongoose.Schema(
     },
     sourceType: {
       type: String,
-      enum: ['trial', 'subscription_monthly', 'purchase_pack', 'purchase_topup', 'migration'],
+      enum: [
+        'trial',
+        'subscription_monthly',
+        'purchase_pack',
+        'purchase_topup',
+        'migration',
+        'platform_manager_grant',
+      ],
       required: true,
     },
     totalCredits: {
