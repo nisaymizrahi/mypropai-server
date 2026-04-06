@@ -75,6 +75,12 @@ const buildPropertyPayload = (source = {}) => {
     unitCount: normalizeNumber(unitCount),
     listingStatus: normalizeString(source.listingStatus),
     sellerAskingPrice: normalizeNumber(source.sellerAskingPrice),
+    externalListingProvider:
+      normalizeString(source.externalListingProvider) ||
+      normalizeString(source.sourceListing?.provider),
+    externalListingId:
+      normalizeString(source.externalListingId) ||
+      normalizeString(source.sourceListing?.listingId),
   };
 };
 
@@ -95,6 +101,12 @@ const findMatchingProperty = async ({ userId, payload, excludePropertyId }) => {
 
   if (excludePropertyId) {
     query._id = { $ne: excludePropertyId };
+  }
+
+  if (payload.externalListingProvider && payload.externalListingId) {
+    query.externalListingProvider = payload.externalListingProvider;
+    query.externalListingId = payload.externalListingId;
+    return Property.findOne(query).sort({ updatedAt: -1 });
   }
 
   if (payload.addressLine1 && payload.city && payload.state) {

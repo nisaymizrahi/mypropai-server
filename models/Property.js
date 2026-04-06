@@ -30,8 +30,12 @@ const PropertySchema = new mongoose.Schema(
     unitCount: { type: Number },
     listingStatus: { type: String, trim: true },
     sellerAskingPrice: { type: Number },
+    externalListingProvider: { type: String, trim: true },
+    externalListingId: { type: String, trim: true },
   },
   { timestamps: true }
 );
+
+PropertySchema.index({ user: 1, externalListingProvider: 1, externalListingId: 1 });
 
 module.exports = mongoose.model('Property', PropertySchema);

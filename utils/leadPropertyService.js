@@ -86,6 +86,7 @@ const buildRentCastSearchParams = (input = {}, options = {}) => {
   const latitude = numberOrNull(input.latitude);
   const longitude = numberOrNull(input.longitude);
   const radius = numberOrNull(options.radius ?? input.radius);
+  const price = buildRangeParam(options.minPrice ?? input.minPrice, options.maxPrice ?? input.maxPrice);
   const bedrooms = buildRangeParam(options.minBedrooms ?? input.minBedrooms, options.maxBedrooms ?? input.maxBedrooms);
   const bathrooms = buildRangeParam(options.minBathrooms ?? input.minBathrooms, options.maxBathrooms ?? input.maxBathrooms);
   const squareFootage = buildRangeParam(
@@ -94,7 +95,10 @@ const buildRentCastSearchParams = (input = {}, options = {}) => {
   );
   const lotSize = buildRangeParam(options.minLotSize ?? input.minLotSize, options.maxLotSize ?? input.maxLotSize);
   const yearBuilt = buildRangeParam(options.minYearBuilt ?? input.minYearBuilt ?? input.yearBuilt, options.maxYearBuilt ?? input.maxYearBuilt ?? input.yearBuilt);
-  const daysOld = numberOrNull(options.daysOld ?? input.daysOld);
+  const daysOld = buildRangeParam(
+    options.minDaysOld ?? input.minDaysOld,
+    options.maxDaysOld ?? options.daysOld ?? input.maxDaysOld ?? input.daysOld
+  );
   const limit = numberOrNull(options.limit);
   const offset = numberOrNull(options.offset);
   const saleDateRange = buildRangeParam(options.minSaleDateRange, options.maxSaleDateRange ?? options.saleDateRange);
@@ -115,12 +119,13 @@ const buildRentCastSearchParams = (input = {}, options = {}) => {
 
   if (radius !== null) params.radius = radius;
   if (propertyType) params.propertyType = propertyType;
+  if (price !== null) params.price = price;
   if (bedrooms !== null) params.bedrooms = bedrooms;
   if (bathrooms !== null) params.bathrooms = bathrooms;
   if (squareFootage !== null) params.squareFootage = squareFootage;
   if (lotSize !== null) params.lotSize = lotSize;
   if (yearBuilt !== null) params.yearBuilt = yearBuilt;
-  if (daysOld !== null) params.daysOld = Math.max(1, Math.round(daysOld));
+  if (daysOld !== null) params.daysOld = daysOld;
   if (saleDateRange !== null) params.saleDateRange = saleDateRange;
   if (limit !== null) params.limit = Math.max(1, Math.round(limit));
   if (offset !== null) params.offset = Math.max(0, Math.round(offset));
@@ -178,6 +183,15 @@ const fetchRentCastSaleListing = async (input) => {
   const params = buildRentCastParams(input);
   const data = await requestRentCast('/listings/sale', params);
   return Array.isArray(data) ? data[0] || null : data;
+};
+
+const fetchRentCastSaleListingById = async (listingId) => {
+  const normalizedId = String(listingId || '').trim();
+  if (!normalizedId) {
+    return null;
+  }
+
+  return requestRentCast(`/listings/sale/${encodeURIComponent(normalizedId)}`);
 };
 
 const searchRentCastSaleListings = async (input, options = {}) => {
@@ -314,6 +328,7 @@ module.exports = {
   fetchRentCastRentalListing,
   fetchRentCastRentEstimate,
   fetchRentCastSaleListing,
+  fetchRentCastSaleListingById,
   fetchRentCastValueEstimate,
   formatPropertyPreview,
   getLeadPropertyPreview,

@@ -62,6 +62,22 @@ const LeadSchema = new mongoose.Schema({
   daysOnMarket: { type: Number },
   lastSalePrice: { type: Number },
   lastSaleDate: { type: Date },
+  sourceListing: {
+    provider: { type: String, trim: true },
+    listingId: { type: String, trim: true },
+    listingType: { type: String, trim: true },
+    url: { type: String, trim: true },
+    importSource: { type: String, trim: true },
+    importedAt: { type: Date },
+    status: { type: String, trim: true },
+    price: { type: Number },
+    listedDate: { type: Date },
+    removedDate: { type: Date },
+    daysOnMarket: { type: Number },
+    primaryPhotoUrl: { type: String, trim: true },
+    photoCount: { type: Number },
+    snapshot: { type: mongoose.Schema.Types.Mixed, default: null },
+  },
   // The stage of the deal in your pipeline.
   status: {
     type: String,
@@ -167,5 +183,7 @@ const LeadSchema = new mongoose.Schema({
   },
 
 }, { timestamps: true });
+
+LeadSchema.index({ user: 1, 'sourceListing.provider': 1, 'sourceListing.listingId': 1 });
 
 module.exports = mongoose.model('Lead', LeadSchema);

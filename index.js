@@ -72,6 +72,7 @@ const platformManagerRoutes = require("./routes/platformManagerRoutes");
 const taskRoutes = require("./routes/taskRoutes");
 const supportRoutes = require("./routes/supportRoutes");
 const emailPreferencesRoutes = require("./routes/emailPreferencesRoutes");
+const marketSearchRoutes = require("./routes/marketSearch");
 // 1. IMPORT THE NEW APPLICATION ROUTES
 const applicationRoutes = require("./routes/applicationRoutes");
 const billingController = require("./controllers/billingController");
@@ -211,6 +212,7 @@ app.use("/api/tasks", requireAuth, taskRoutes);
 app.use("/api/platform-manager", platformManagerRoutes);
 app.use("/api/support", supportRoutes);
 app.use("/api/email-preferences", emailPreferencesRoutes);
+app.use("/api/market-search", requireAuth, marketSearchRoutes);
 // 2. USE THE NEW APPLICATION ROUTES
 app.use("/api/applications", applicationRoutes); // Note: Auth is handled inside the routes file
 
