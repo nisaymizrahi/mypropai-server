@@ -74,8 +74,27 @@ const buildBudgetScopeMeta = ({ scopeKey = '', category = '', description = '' }
   };
 };
 
+const applyBudgetScopeMeta = (input = null) => {
+  if (!input || typeof input !== 'object') {
+    return input;
+  }
+
+  const scopeMeta = buildBudgetScopeMeta({
+    scopeKey: input.scopeKey,
+    category: input.category,
+    description: input.description,
+  });
+
+  input.scopeKey = scopeMeta.scopeKey;
+  input.scopeGroup = scopeMeta.scopeGroup;
+  input.category = String(input.category || scopeMeta.defaultCategory || '').trim();
+
+  return input;
+};
+
 module.exports = {
   SCOPE_OPTIONS,
+  applyBudgetScopeMeta,
   buildBudgetScopeMeta,
   resolveScopeOption,
   titleCaseFromSlug,

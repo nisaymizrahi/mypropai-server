@@ -19,8 +19,16 @@ router.post('/', bidController.createBid);
 // @desc    Get all bids for a specific lead
 router.get('/lead/:leadId', bidController.getBidsForLead);
 
+// @route   GET /api/bids/project/:investmentId
+// @desc    Get all bids visible in project execution
+router.get('/project/:investmentId', bidController.getBidsForProject);
+
 // ✅ NEW: Route to update a bid's details (e.g., after user edits)
 router.patch('/:id', bidController.updateBid);
+
+// @route   POST /api/bids/:id/award
+// @desc    Convert a bid into a project commitment / budget award
+router.post('/:id/award', bidController.awardBidToBudgetItem);
 
 // @route   DELETE /api/bids/:id
 // @desc    Delete a bid

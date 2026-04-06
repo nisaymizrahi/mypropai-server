@@ -1,4 +1,5 @@
 const Lead = require("../models/Lead");
+const Investment = require("../models/Investment");
 const PropertyReport = require("../models/PropertyReport");
 const {
   buildLegacyCompsAnalysisSnapshot,
@@ -6,6 +7,9 @@ const {
   sanitizeSelectedComparable,
   summarizeComps,
 } = require("../utils/compsAnalysisService");
+
+const cloneSerializable = (value) =>
+  value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 
 const buildDefaultTitle = (address = "", generatedAt = new Date()) => {
   const safeAddress = String(address || "").trim() || "Property";
@@ -72,6 +76,7 @@ exports.listReports = async (req, res) => {
     const kind = String(req.query.kind || "comps").trim();
     const contextType = String(req.query.contextType || "").trim();
     const leadId = String(req.query.leadId || "").trim();
+    const investmentId = String(req.query.investmentId || "").trim();
 
     if (kind !== "comps") {
       return res.status(400).json({ msg: "Unsupported report kind." });
@@ -104,6 +109,19 @@ exports.listReports = async (req, res) => {
       query.investment = null;
     }
 
+    if (contextType === "project") {
+      if (!investmentId) {
+        return res.status(400).json({ msg: "investmentId is required for project reports." });
+      }
+
+      const investment = await Investment.findOne({ _id: investmentId, user: req.user.id }).select("_id");
+      if (!investment) {
+        return res.status(404).json({ msg: "Project not found." });
+      }
+
+      query.investment = investment._id;
+    }
+
     const reports = await PropertyReport.find(query).sort({ generatedAt: -1, createdAt: -1 }).lean();
     res.json(reports.map(formatCompsReportResponse));
   } catch (error) {
@@ -117,6 +135,7 @@ exports.saveCompsReport = async (req, res) => {
     const {
       contextType,
       leadId,
+      investmentId,
       subject = {},
       deal = {},
       filters = {},
@@ -127,7 +146,7 @@ exports.saveCompsReport = async (req, res) => {
     } = req.body || {};
 
     const normalizedContextType = String(contextType || "").trim();
-    if (!["lead", "standalone"].includes(normalizedContextType)) {
+    if (!["lead", "standalone", "project"].includes(normalizedContextType)) {
       return res.status(400).json({ msg: "A valid report contextType is required." });
     }
 
@@ -144,6 +163,7 @@ exports.saveCompsReport = async (req, res) => {
     }
 
     let lead = null;
+    let investment = null;
     if (normalizedContextType === "lead") {
       if (!leadId) {
         return res.status(400).json({ msg: "leadId is required to save a lead report." });
@@ -152,6 +172,21 @@ exports.saveCompsReport = async (req, res) => {
       lead = await Lead.findOne({ _id: leadId, user: req.user.id });
       if (!lead) {
         return res.status(404).json({ msg: "Lead not found." });
+      }
+    }
+
+    if (normalizedContextType === "project") {
+      if (!investmentId) {
+        return res.status(400).json({ msg: "investmentId is required to save a project report." });
+      }
+
+      investment = await Investment.findOne({ _id: investmentId, user: req.user.id });
+      if (!investment) {
+        return res.status(404).json({ msg: "Project not found." });
+      }
+
+      if (investment.sourceLead) {
+        lead = await Lead.findOne({ _id: investment.sourceLead, user: req.user.id });
       }
     }
 
@@ -177,6 +212,7 @@ exports.saveCompsReport = async (req, res) => {
       kind: "comps",
       contextType: normalizedContextType,
       lead: lead?._id || null,
+      investment: investment?._id || null,
       title: String(title || "").trim() || buildDefaultTitle(subject.address, generatedAt),
       address: subject.address,
       generatedAt,
@@ -191,27 +227,52 @@ exports.saveCompsReport = async (req, res) => {
       reportVersion: normalizedReportData?.masterReportVersion || 1,
     });
 
+    const legacyCompsAnalysis = buildLegacyCompsAnalysisSnapshot({
+      generatedAt,
+      filters,
+      valuationContext: valuationContext || null,
+      summary,
+      aiReport:
+        aiReport && aiReport.verdict
+          ? {
+              headline: aiReport.headline,
+              executiveSummary: aiReport.executiveSummary,
+              pricingRecommendation: aiReport.valueTakeaway,
+              offerStrategy: aiReport.dealTakeaway,
+              confidence: aiReport.confidence,
+              riskFlags: aiReport.riskFlags,
+              nextSteps: aiReport.nextSteps,
+            }
+          : aiReport,
+      comps,
+    });
+
     if (lead) {
-      lead.compsAnalysis = buildLegacyCompsAnalysisSnapshot({
-        generatedAt,
-        filters,
-            valuationContext: valuationContext || null,
-            summary,
-            aiReport:
-              aiReport && aiReport.verdict
-                ? {
-                    headline: aiReport.headline,
-                    executiveSummary: aiReport.executiveSummary,
-                    pricingRecommendation: aiReport.valueTakeaway,
-                    offerStrategy: aiReport.dealTakeaway,
-                    confidence: aiReport.confidence,
-                    riskFlags: aiReport.riskFlags,
-                    nextSteps: aiReport.nextSteps,
-                  }
-                : aiReport,
-            comps,
-          });
+      lead.compsAnalysis = legacyCompsAnalysis;
       await lead.save();
+    }
+
+    const investmentToSync =
+      investment ||
+      (lead
+        ? await Investment.findOne({ user: req.user.id, sourceLead: lead._id }).sort({
+            createdAt: -1,
+          })
+        : null);
+
+    if (investmentToSync) {
+      const nextSnapshot =
+        investmentToSync.sourceLeadSnapshot &&
+        typeof investmentToSync.sourceLeadSnapshot === "object" &&
+        !Array.isArray(investmentToSync.sourceLeadSnapshot)
+          ? cloneSerializable(investmentToSync.sourceLeadSnapshot)
+          : {};
+
+      investmentToSync.sourceLeadSnapshot = {
+        ...nextSnapshot,
+        compsAnalysis: legacyCompsAnalysis,
+      };
+      await investmentToSync.save();
     }
 
     res.status(201).json(formatCompsReportResponse(report));

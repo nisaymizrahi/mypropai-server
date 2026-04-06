@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const { nanoid } = require('nanoid');
-const { buildBudgetScopeMeta } = require('../utils/projectScopes');
+const { applyBudgetScopeMeta, buildBudgetScopeMeta } = require('../utils/projectScopes');
 
 const BudgetAwardSchema = new mongoose.Schema(
   {
@@ -109,6 +109,19 @@ const BudgetItemSchema = new mongoose.Schema({
   },
   awards: [BudgetAwardSchema],
 }, { timestamps: true });
+
+const applyScopeTransform = (_doc, ret) => {
+  applyBudgetScopeMeta(ret);
+  return ret;
+};
+
+BudgetItemSchema.set('toJSON', {
+  transform: applyScopeTransform,
+});
+
+BudgetItemSchema.set('toObject', {
+  transform: applyScopeTransform,
+});
 
 BudgetItemSchema.pre('validate', function syncScopeMetadata(next) {
   const scopeMeta = buildBudgetScopeMeta({

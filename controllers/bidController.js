@@ -1,8 +1,11 @@
 const Bid = require('../models/Bid');
 const Lead = require('../models/Lead');
+const Investment = require('../models/Investment');
+const BudgetItem = require('../models/BudgetItem');
 const Vendor = require('../models/Vendor');
 const OpenAI = require('openai');
 const axios = require('axios');
+const { buildBudgetScopeMeta } = require('../utils/projectScopes');
 
 const getOpenAIClient = () => {
     if (!process.env.OPENAI_API_KEY) {
@@ -83,9 +86,9 @@ const sanitizeBidItems = (input = []) => {
 };
 
 const buildRenovationItemContext = (lead) => {
-    const items = Array.isArray(lead?.renovationPlan?.items) ? lead.renovationPlan.items : [];
+  const items = Array.isArray(lead?.renovationPlan?.items) ? lead.renovationPlan.items : [];
 
-    return items
+  return items
         .map((item) => {
             if (!item?.itemId) {
                 return null;
@@ -94,12 +97,41 @@ const buildRenovationItemContext = (lead) => {
             return {
                 renovationItemId: String(item.itemId),
                 renovationItemName: String(item.name || '').trim(),
+                budgetItemId: null,
+                budgetItemLabel: '',
                 category: String(item.category || '').trim(),
                 budget: normalizeCurrencyValue(item.budget),
                 scopeDescription: String(item.scopeDescription || '').trim(),
             };
         })
         .filter(Boolean);
+};
+
+const buildBudgetItemScopeContext = async (investmentId) => {
+    const budgetItems = await BudgetItem.find({ investment: investmentId }).select(
+        '_id category description budgetedAmount sourceRenovationItemId scopeKey scopeGroup'
+    );
+
+    return budgetItems
+        .map((item) => {
+            const scopeMeta = buildBudgetScopeMeta({
+                scopeKey: item.scopeKey,
+                category: item.category,
+                description: item.description,
+            });
+
+            return {
+                renovationItemId: String(item._id),
+                renovationItemName: String(item.category || scopeMeta.defaultCategory || '').trim(),
+                budgetItemId: item._id,
+                budgetItemLabel: String(item.category || scopeMeta.defaultCategory || '').trim(),
+                sourceRenovationItemId: String(item.sourceRenovationItemId || '').trim(),
+                category: String(scopeMeta.scopeKey || '').trim(),
+                budget: normalizeCurrencyValue(item.budgetedAmount),
+                scopeDescription: String(item.description || '').trim(),
+            };
+        })
+        .filter((item) => item.renovationItemId && item.renovationItemName);
 };
 
 const buildVendorSnapshot = (input = {}, fallbackName = '') => {
@@ -171,6 +203,11 @@ const sanitizeBidAssignments = (input = [], renovationItems = []) => {
     const renovationById = new Map(
         renovationItems.map((item) => [String(item.renovationItemId), item])
     );
+    const renovationBySourceId = new Map(
+        renovationItems
+            .filter((item) => item?.sourceRenovationItemId)
+            .map((item) => [String(item.sourceRenovationItemId), item])
+    );
     const renovationByName = new Map(
         renovationItems.map((item) => [String(item.renovationItemName || '').trim().toLowerCase(), item])
     );
@@ -188,6 +225,7 @@ const sanitizeBidAssignments = (input = [], renovationItems = []) => {
 
             let matchedRenovationItem =
                 renovationById.get(requestedId) ||
+                renovationBySourceId.get(requestedId) ||
                 renovationByName.get(requestedName.toLowerCase()) ||
                 null;
 
@@ -211,6 +249,8 @@ const sanitizeBidAssignments = (input = [], renovationItems = []) => {
                 renovationItemName:
                     String(matchedRenovationItem.renovationItemName || requestedName).trim() ||
                     'Renovation item',
+                budgetItemId: matchedRenovationItem.budgetItemId || null,
+                budgetItemLabel: matchedRenovationItem.budgetItemLabel || '',
                 amount,
                 scopeSummary:
                     typeof assignment.scopeSummary === 'string' ? assignment.scopeSummary.trim() : '',
@@ -262,6 +302,8 @@ const deriveAssignmentsFromItems = (bidItems = [], renovationItems = []) => {
         const existing = assignmentMap.get(bestMatch.renovationItemId) || {
             renovationItemId: bestMatch.renovationItemId,
             renovationItemName: bestMatch.renovationItemName,
+            budgetItemId: bestMatch.budgetItemId || null,
+            budgetItemLabel: bestMatch.budgetItemLabel || '',
             amount: 0,
             scopeSummary: '',
             confidence: 0.55,
@@ -286,6 +328,32 @@ const getAuthorizedLead = async (leadId, userId) => {
     return lead;
 };
 
+const getAuthorizedInvestment = async (investmentId, userId) => {
+    if (!investmentId) {
+        return null;
+    }
+
+    const investment = await Investment.findById(investmentId);
+    if (!investment || String(investment.user) !== String(userId)) {
+        return null;
+    }
+
+    return investment;
+};
+
+const getAuthorizedBudgetItem = async (budgetItemId, userId) => {
+    if (!budgetItemId) {
+        return null;
+    }
+
+    const budgetItem = await BudgetItem.findById(budgetItemId);
+    if (!budgetItem || String(budgetItem.user) !== String(userId)) {
+        return null;
+    }
+
+    return budgetItem;
+};
+
 const getAuthorizedVendor = async (vendorId, userId) => {
     if (!vendorId) {
         return null;
@@ -299,6 +367,43 @@ const getAuthorizedVendor = async (vendorId, userId) => {
     return vendor;
 };
 
+const resolveBidScopeContext = async ({ leadId, investmentId, userId }) => {
+    const investment = await getAuthorizedInvestment(investmentId, userId);
+    if (investmentId && !investment) {
+        return { error: { status: 401, msg: 'Project not found or user not authorized.' } };
+    }
+
+    const resolvedLeadId = leadId || investment?.sourceLead || '';
+    const lead = resolvedLeadId ? await getAuthorizedLead(resolvedLeadId, userId) : null;
+
+    if (resolvedLeadId && !lead) {
+        return { error: { status: 401, msg: 'Lead not found or user not authorized.' } };
+    }
+
+    let scopeItems = investment
+        ? await buildBudgetItemScopeContext(investment._id)
+        : buildRenovationItemContext(lead);
+
+    if ((!scopeItems || scopeItems.length === 0) && lead) {
+        scopeItems = buildRenovationItemContext(lead);
+    }
+
+    if (!lead) {
+        return {
+            error: {
+                status: 400,
+                msg: 'Bids require a project linked to a lead, or a lead with scope items.',
+            },
+        };
+    }
+
+    return {
+        lead,
+        investment,
+        scopeItems,
+    };
+};
+
 // @desc    Upload an estimate, parse it with AI, and create a new bid
 exports.importBid = async (req, res) => {
     try {
@@ -307,18 +412,20 @@ exports.importBid = async (req, res) => {
             return res.status(503).json({ msg: 'OpenAI is not configured on the server.' });
         }
 
-        const { leadId } = req.body;
+        const { leadId, investmentId } = req.body;
         if (!req.file) {
             return res.status(400).json({ msg: 'Estimate file is required.' });
         }
 
-        const lead = await getAuthorizedLead(leadId, req.user.id);
-        if (!lead) {
-            return res.status(401).json({ msg: 'Lead not found or user not authorized.' });
+        const { lead, investment, scopeItems, error } = await resolveBidScopeContext({
+            leadId,
+            investmentId,
+            userId: req.user.id,
+        });
+        if (error) {
+            return res.status(error.status).json({ msg: error.msg });
         }
 
-        const renovationItems = buildRenovationItemContext(lead);
-        
         const ocrData = new URLSearchParams({
             url: req.file.path,
             isOverlayRequired: 'false',
@@ -356,8 +463,8 @@ exports.importBid = async (req, res) => {
 "items": array of objects with "description", "cost", and optional "category"
 "renovationAssignments": array of objects with "renovationItemId", "renovationItemName", "amount", optional "scopeSummary", optional "matchedLineItems", and optional "confidence"
 
-If a quote clearly covers one or more renovation items provided by the user, map the relevant amount to those renovation items. Only assign an amount when the document gives you enough evidence to do so. If the quote is only a whole-project quote and you cannot confidently split it by renovation item, return an empty renovationAssignments array.`;
-        const userPrompt = `Renovation items for this lead:\n${JSON.stringify(renovationItems, null, 2)}\n\nHere is the raw text from the estimate:\n\n${extractedText}`;
+If a quote clearly covers one or more scope items provided by the user, map the relevant amount to those scope items. Only assign an amount when the document gives you enough evidence to do so. If the quote is only a whole-project quote and you cannot confidently split it by scope item, return an empty renovationAssignments array.`;
+        const userPrompt = `Scope items for this project:\n${JSON.stringify(scopeItems, null, 2)}\n\nHere is the raw text from the estimate:\n\n${extractedText}`;
 
         const completion = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
@@ -369,12 +476,12 @@ If a quote clearly covers one or more renovation items provided by the user, map
         const validItems = sanitizeBidItems(structuredData.items);
         const validAssignments = sanitizeBidAssignments(
             structuredData.renovationAssignments,
-            renovationItems
+            scopeItems
         );
         const fallbackAssignments =
             validAssignments.length > 0
                 ? validAssignments
-                : deriveAssignmentsFromItems(validItems, renovationItems);
+                : deriveAssignmentsFromItems(validItems, scopeItems);
         const totalAmount =
             normalizeCurrencyValue(structuredData.totalAmount) ??
             validItems.reduce((sum, item) => sum + item.cost, 0);
@@ -393,7 +500,8 @@ If a quote clearly covers one or more renovation items provided by the user, map
 
         const newBid = new Bid({
             user: req.user.id,
-            lead: leadId,
+            lead: lead._id,
+            investment: investment?._id || null,
             contractorName: structuredData.contractorName,
             totalAmount,
             vendor: matchedVendor?._id || null,
@@ -439,6 +547,7 @@ exports.createBid = async (req, res) => {
     try {
         const {
             leadId,
+            investmentId,
             vendorId,
             contractorName,
             totalAmount,
@@ -447,9 +556,13 @@ exports.createBid = async (req, res) => {
             notes,
         } = req.body;
 
-        const lead = await getAuthorizedLead(leadId, req.user.id);
-        if (!lead) {
-            return res.status(401).json({ msg: 'Lead not found or user not authorized.' });
+        const { lead, investment, scopeItems, error } = await resolveBidScopeContext({
+            leadId,
+            investmentId,
+            userId: req.user.id,
+        });
+        if (error) {
+            return res.status(error.status).json({ msg: error.msg });
         }
 
         const vendor = await getAuthorizedVendor(vendorId, req.user.id);
@@ -457,10 +570,9 @@ exports.createBid = async (req, res) => {
             return res.status(400).json({ msg: 'Selected vendor was not found.' });
         }
 
-        const renovationItems = buildRenovationItemContext(lead);
         const sanitizedItems = Array.isArray(items) ? sanitizeBidItems(items) : [];
         const sanitizedAssignments = Array.isArray(renovationAssignments)
-            ? sanitizeBidAssignments(renovationAssignments, renovationItems)
+            ? sanitizeBidAssignments(renovationAssignments, scopeItems)
             : [];
         const assignmentTotal = sanitizedAssignments.reduce(
             (sum, assignment) => sum + (assignment.amount || 0),
@@ -481,7 +593,8 @@ exports.createBid = async (req, res) => {
 
         const bid = new Bid({
             user: req.user.id,
-            lead: leadId,
+            lead: lead._id,
+            investment: investment?._id || null,
             vendor: vendor?._id || null,
             contractorName: normalizeOptionalString(contractorName) || vendor?.name || 'Custom quote',
             totalAmount: derivedTotal,
@@ -504,15 +617,30 @@ exports.createBid = async (req, res) => {
 // ✅ NEW: Function to update an existing bid
 exports.updateBid = async (req, res) => {
     try {
-        const { contractorName, totalAmount, items, renovationAssignments, vendorId, notes } = req.body;
+        const {
+            contractorName,
+            totalAmount,
+            items,
+            renovationAssignments,
+            vendorId,
+            notes,
+            investmentId,
+            decisionStatus,
+        } = req.body;
         const bid = await Bid.findById(req.params.id);
 
         if (!bid || bid.user.toString() !== req.user.id) {
             return res.status(401).json({ msg: 'Bid not found or user not authorized.' });
         }
 
-        const lead = await Lead.findById(bid.lead);
-        const renovationItems = buildRenovationItemContext(lead);
+        const { lead, investment, scopeItems, error } = await resolveBidScopeContext({
+            leadId: bid.lead,
+            investmentId: investmentId || bid.investment,
+            userId: req.user.id,
+        });
+        if (error) {
+            return res.status(error.status).json({ msg: error.msg });
+        }
         const vendor = vendorId !== undefined
             ? await getAuthorizedVendor(vendorId, req.user.id)
             : null;
@@ -525,8 +653,9 @@ exports.updateBid = async (req, res) => {
         bid.totalAmount = normalizeCurrencyValue(totalAmount) ?? bid.totalAmount;
         bid.items = Array.isArray(items) ? sanitizeBidItems(items) : bid.items;
         bid.renovationAssignments = Array.isArray(renovationAssignments)
-            ? sanitizeBidAssignments(renovationAssignments, renovationItems)
+            ? sanitizeBidAssignments(renovationAssignments, scopeItems)
             : bid.renovationAssignments;
+        bid.investment = investment?._id || bid.investment || null;
         if (vendorId !== undefined) {
             bid.vendor = vendor?._id || null;
             if (vendor) {
@@ -536,6 +665,9 @@ exports.updateBid = async (req, res) => {
         }
         if (notes !== undefined) {
             bid.notes = normalizeOptionalString(notes);
+        }
+        if (decisionStatus && ['open', 'awarded', 'archived'].includes(decisionStatus)) {
+            bid.decisionStatus = decisionStatus;
         }
 
         await bid.save();
@@ -558,6 +690,123 @@ exports.deleteBid = async (req, res) => {
         res.json({ msg: 'Bid deleted.' });
     } catch (error) {
         console.error('Error deleting bid:', error);
+        res.status(500).json({ msg: 'Server Error' });
+    }
+};
+
+exports.getBidsForProject = async (req, res) => {
+    try {
+        const investment = await getAuthorizedInvestment(req.params.investmentId, req.user.id);
+        if (!investment) {
+            return res.status(401).json({ msg: 'Project not found or user not authorized.' });
+        }
+
+        const query = investment.sourceLead
+            ? {
+                $or: [
+                    { investment: investment._id },
+                    { lead: investment.sourceLead },
+                ],
+            }
+            : { investment: investment._id };
+
+        const bids = await Bid.find({
+            user: req.user.id,
+            ...query,
+        })
+            .populate('vendor', 'name trade specialties contactInfo')
+            .sort({ createdAt: -1 });
+
+        res.json(bids);
+    } catch (error) {
+        console.error('Error fetching project bids:', error);
+        res.status(500).json({ msg: 'Server Error' });
+    }
+};
+
+exports.awardBidToBudgetItem = async (req, res) => {
+    try {
+        const bid = await Bid.findById(req.params.id);
+        if (!bid || String(bid.user) !== String(req.user.id)) {
+            return res.status(401).json({ msg: 'Bid not found or user not authorized.' });
+        }
+
+        const budgetItem = await getAuthorizedBudgetItem(req.body.budgetItemId, req.user.id);
+        if (!budgetItem) {
+            return res.status(400).json({ msg: 'Selected scope item was not found.' });
+        }
+
+        const investment = await getAuthorizedInvestment(budgetItem.investment, req.user.id);
+        if (!investment) {
+            return res.status(400).json({ msg: 'Project not found for this scope item.' });
+        }
+
+        const awardAmount = normalizeCurrencyValue(req.body.amount) ?? normalizeCurrencyValue(bid.totalAmount);
+        if (awardAmount === null || awardAmount <= 0) {
+            return res.status(400).json({ msg: 'Award amount must be greater than zero.' });
+        }
+
+        const awardDescription = normalizeOptionalString(req.body.description || req.body.scopeSummary || bid.notes);
+        const vendorName =
+            bid.vendorSnapshot?.name ||
+            bid.contractorName ||
+            normalizeOptionalString(req.body.vendorName) ||
+            'Selected vendor';
+
+        const existingAward = (budgetItem.awards || []).find(
+            (award) => String(award.sourceBid || '') === String(bid._id)
+        );
+
+        if (existingAward) {
+            existingAward.vendor = bid.vendor || null;
+            existingAward.vendorName = bid.vendor?.name || vendorName;
+            existingAward.description = awardDescription || existingAward.description;
+            existingAward.amount = awardAmount;
+            existingAward.notes = normalizeOptionalString(req.body.notes) || existingAward.notes;
+        } else {
+            budgetItem.awards.push({
+                vendor: bid.vendor || null,
+                vendorName: bid.vendor?.name || vendorName,
+                description: awardDescription,
+                amount: awardAmount,
+                notes: normalizeOptionalString(req.body.notes),
+                sourceBid: bid._id,
+            });
+        }
+
+        await budgetItem.save();
+
+        const savedAward = (budgetItem.awards || []).find(
+            (award) => String(award.sourceBid || '') === String(bid._id)
+        );
+
+        bid.investment = investment._id;
+        bid.decisionStatus = 'awarded';
+        bid.awardedAt = new Date();
+        const existingBidAward = (bid.awards || []).find(
+            (award) => String(award.budgetItem || '') === String(budgetItem._id)
+        );
+        if (existingBidAward) {
+            existingBidAward.amount = awardAmount;
+            existingBidAward.awardId = savedAward?.awardId || existingBidAward.awardId;
+        } else {
+            bid.awards.push({
+                budgetItem: budgetItem._id,
+                awardId: savedAward?.awardId || '',
+                amount: awardAmount,
+            });
+        }
+
+        await bid.save();
+        await populateBidVendor(bid);
+
+        res.json({
+            bid,
+            budgetItemId: budgetItem._id,
+            awardId: savedAward?.awardId || '',
+        });
+    } catch (error) {
+        console.error('Error awarding bid to budget item:', error);
         res.status(500).json({ msg: 'Server Error' });
     }
 };
