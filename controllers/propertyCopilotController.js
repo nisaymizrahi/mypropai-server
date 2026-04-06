@@ -10,6 +10,10 @@ const {
   buildPropertyRecord,
   findPropertyGroupForUser,
 } = require('../utils/propertyWorkspace');
+const {
+  normalizeSearchableDocuments,
+  searchPropertyDocuments,
+} = require('../utils/propertyCopilotDocumentService');
 
 const PROPERTY_TAB_META = [
   {
@@ -198,7 +202,8 @@ const buildTaskSummary = (tasks = []) => {
 
 const buildDocumentSummary = ({
   projectDocuments = [],
-  managedDocumentCount = 0,
+  managedDocuments = [],
+  searchableDocumentCount = 0,
 }) => {
   const categoryCounts = new Map();
 
@@ -207,9 +212,15 @@ const buildDocumentSummary = ({
     categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
   });
 
+  managedDocuments.forEach((document) => {
+    const category = document?.unit ? 'Unit' : 'Property';
+    categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
+  });
+
   return {
     projectDocumentCount: projectDocuments.length,
-    managedDocumentCount,
+    managedDocumentCount: managedDocuments.length,
+    searchableDocumentCount,
     categories: [...categoryCounts.entries()]
       .map(([category, count]) => ({ category, count }))
       .sort((left, right) => right.count - left.count || left.category.localeCompare(right.category))
@@ -321,7 +332,7 @@ const buildCopilotContext = async ({ userId, propertyGroup, activeTab }) => {
     expenses,
     projectDocuments,
     reports,
-    managedDocumentCount,
+    managedDocuments,
   ] = await Promise.all([
     Task.find({ user: userId, propertyKey: propertyRecord.propertyKey })
       .sort({ updatedAt: -1, dueDate: 1 })
@@ -350,14 +361,21 @@ const buildCopilotContext = async ({ userId, propertyGroup, activeTab }) => {
       .limit(6)
       .lean(),
     managedProperty
-      ? UnitDocument.countDocuments({
+      ? UnitDocument.find({
           $or: [
             { property: managedProperty._id, unit: null },
             managedUnitIds.length ? { unit: { $in: managedUnitIds } } : null,
           ].filter(Boolean),
         })
-      : Promise.resolve(0),
+          .populate('unit', '_id unitNumber name')
+          .lean()
+      : Promise.resolve([]),
   ]);
+
+  const searchableDocuments = await normalizeSearchableDocuments({
+    projectDocuments,
+    managedDocuments: Array.isArray(managedDocuments) ? managedDocuments : [],
+  });
 
   return {
     propertyRecord,
@@ -413,13 +431,19 @@ const buildCopilotContext = async ({ userId, propertyGroup, activeTab }) => {
       tasks: buildTaskSummary(propertyTasks),
       documents: buildDocumentSummary({
         projectDocuments,
-        managedDocumentCount,
+        managedDocuments: Array.isArray(managedDocuments) ? managedDocuments : [],
+        searchableDocumentCount: searchableDocuments.length,
       }),
       reports: buildReportSummary({
         reports,
         lead,
       }),
       navigation: buildNavigationSummary(propertyRecord),
+    },
+    documentSearchState: {
+      projectDocuments,
+      managedDocuments: Array.isArray(managedDocuments) ? managedDocuments : [],
+      searchableDocumentCount: searchableDocuments.length,
     },
   };
 };
@@ -600,6 +624,7 @@ Rules:
 - If a detail is missing, say so clearly instead of guessing.
 - Keep responses concise, professional, and action-oriented.
 - If the user asks to open, go to, show, or navigate to a section, call navigate_property_workspace.
+- If the user asks what an uploaded document, PDF, contract, invoice, inspection, receipt, report, permit, closing file, or lease says, call search_property_documents first.
 - If the user asks to create, add, remind, or follow up with a task and both title and due date are clear, call create_property_task.
 - Do not create a task unless the title and due date are both available.
 - When discussing relative dates like today or tomorrow, interpret them relative to ${getCurrentDateLabel()} in ${COPILOT_TIMEZONE}. Mention exact dates when helpful.
@@ -632,6 +657,23 @@ const buildToolDefinitions = () => [
         },
       },
       required: ['destination'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'search_property_documents',
+    description:
+      'Search the uploaded property PDFs when the user asks a question about document contents.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        query: {
+          type: 'string',
+        },
+      },
+      required: ['query'],
     },
   },
   {
@@ -698,7 +740,7 @@ exports.respond = async (req, res) => {
       return res.status(404).json({ msg: 'Property not found.' });
     }
 
-    const { propertyRecord, context } = await buildCopilotContext({
+    const { propertyRecord, context, documentSearchState } = await buildCopilotContext({
       userId: req.user.id,
       propertyGroup,
       activeTab,
@@ -758,6 +800,40 @@ exports.respond = async (req, res) => {
               type: 'navigate',
               label: result.label,
               path: result.path,
+            });
+          }
+
+          toolOutputs.push({
+            type: 'function_call_output',
+            call_id: toolCall.call_id,
+            output: JSON.stringify(result),
+          });
+          continue;
+        }
+
+        if (toolCall.name === 'search_property_documents') {
+          const result = await searchPropertyDocuments({
+            openai,
+            userId: req.user.id,
+            propertyKey: propertyRecord.propertyKey,
+            propertyId: propertyRecord.propertyId,
+            propertyTitle: propertyRecord.title,
+            projectDocuments: documentSearchState.projectDocuments,
+            managedDocuments: documentSearchState.managedDocuments,
+            query: String(args.query || '').trim(),
+          });
+
+          if (result.ok) {
+            result.results.slice(0, 3).forEach((documentResult) => {
+              if (!documentResult.assetId) {
+                return;
+              }
+
+              actions.push({
+                type: 'open_document',
+                label: `Open ${documentResult.filename}`,
+                assetId: documentResult.assetId,
+              });
             });
           }
 

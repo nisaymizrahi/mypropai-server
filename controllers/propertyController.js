@@ -17,6 +17,7 @@ const {
   upsertCanonicalProperty,
 } = require('../utils/propertyRecordService');
 const { startManagementWorkspace } = require('../utils/managementWorkspaceService');
+const { createExecutionProjectFromLead } = require('../utils/projectLifecycleService');
 
 const sharedNumericFields = new Set([
   'bedrooms',
@@ -474,22 +475,38 @@ exports.createAcquisitionWorkspace = async (req, res) => {
     const requestedStrategy = normalizePropertyStrategy(req.body?.strategy || 'flip');
     const canonicalProperty = await ensureCanonicalPropertyForGroup(req.user.id, property, record.sharedProfile);
 
-    const investment = await Investment.create({
-      user: req.user.id,
-      property: canonicalProperty?._id || null,
-      address: record.sharedProfile.address,
-      propertyType: record.sharedProfile.propertyType || '',
-      bedrooms: record.sharedProfile.bedrooms,
-      bathrooms: record.sharedProfile.bathrooms,
-      sqft: record.sharedProfile.squareFootage,
-      lotSize: record.sharedProfile.lotSize,
-      yearBuilt: record.sharedProfile.yearBuilt,
-      unitCount: record.sharedProfile.unitCount,
-      purchasePrice: lead?.targetOffer || lead?.sellerAskingPrice || 0,
-      arv: lead?.arv || 0,
-      strategy: requestedStrategy,
-      type: requestedStrategy,
-    });
+    let investment = null;
+
+    if (lead) {
+      const executionProject = await createExecutionProjectFromLead({
+        lead,
+        userId: req.user.id,
+        propertyId: canonicalProperty?._id || null,
+        strategy: requestedStrategy,
+        type: requestedStrategy,
+        status: 'In Progress',
+        linkLead: true,
+      });
+
+      investment = executionProject.project;
+    } else {
+      investment = await Investment.create({
+        user: req.user.id,
+        property: canonicalProperty?._id || null,
+        address: record.sharedProfile.address,
+        propertyType: record.sharedProfile.propertyType || '',
+        bedrooms: record.sharedProfile.bedrooms,
+        bathrooms: record.sharedProfile.bathrooms,
+        sqft: record.sharedProfile.squareFootage,
+        lotSize: record.sharedProfile.lotSize,
+        yearBuilt: record.sharedProfile.yearBuilt,
+        unitCount: record.sharedProfile.unitCount,
+        purchasePrice: 0,
+        arv: 0,
+        strategy: requestedStrategy,
+        type: requestedStrategy,
+      });
+    }
 
     const groups = await fetchPropertyGroupsForUser(req.user.id);
     const refreshed =

@@ -19,6 +19,11 @@ const ExpenseSchema = new mongoose.Schema({
     ref: 'BudgetItem',
     default: null,
   },
+  receiptRecord: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ProjectReceipt',
+    default: null,
+  },
   awardId: {
     type: String,
     default: '',

@@ -4,6 +4,7 @@ const { isPlatformManager, normalizeEmail } = require('../utils/platformAccess')
 const { createAuthSessionToken, revokeAuthSession } = require('../utils/authSessionService');
 const sendEmail = require('../utils/sendEmail');
 const { generateHashedToken, hashToken } = require('../utils/tokenSecurity');
+const { buildEmailPreferencesUrl } = require('../utils/emailPreferences');
 const {
   AUTH_ABSOLUTE_TIMEOUT_HOURS,
   AUTH_IDLE_TIMEOUT_MINUTES,
@@ -24,6 +25,66 @@ const {
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 const parseBoolean = (value) => value === true || value === 'true' || value === 1 || value === '1';
+const canSendTransactionalEmail = () =>
+  Boolean(process.env.SENDGRID_API_KEY && process.env.EMAIL_FROM);
+const escapeHtml = (value = '') =>
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const buildWelcomeEmailHtml = (user) => {
+  const firstName = getResolvedNameParts(user).firstName || user.name || 'there';
+  const workspaceUrl = `${FRONTEND_URL}/leads`;
+  const preferencesUrl = buildEmailPreferencesUrl({
+    email: user.email,
+    userId: user._id,
+  });
+
+  return `
+    <div style="font-family:Arial,sans-serif;color:#1c1713;line-height:1.6;">
+      <h2 style="margin:0 0 12px;">Welcome to Fliprop</h2>
+      <p style="margin:0 0 16px;">Hi ${escapeHtml(firstName)}, your Fliprop workspace is ready.</p>
+      <p style="margin:0 0 16px;">
+        You can sign in anytime to organize leads, manage properties, and keep your workflow in one place.
+      </p>
+      <p style="margin:0 0 20px;">
+        <a href="${escapeHtml(
+          workspaceUrl
+        )}" style="display:inline-block;background:#1c1713;color:#ffffff;padding:12px 18px;border-radius:999px;text-decoration:none;font-weight:600;">
+          Open your workspace
+        </a>
+      </p>
+      <p style="margin:0 0 12px;color:#5f544b;">
+        We'll still send important account, billing, security, and support emails when needed.
+      </p>
+      <p style="margin:0;color:#5f544b;">
+        Manage promotional email preferences here:
+        <a href="${escapeHtml(preferencesUrl)}">${escapeHtml(preferencesUrl)}</a>
+      </p>
+    </div>
+  `;
+};
+
+const sendWelcomeEmail = async (user) => {
+  if (!user || !canSendTransactionalEmail()) {
+    return false;
+  }
+
+  try {
+    await sendEmail({
+      to: user.email,
+      subject: 'Welcome to Fliprop',
+      html: buildWelcomeEmailHtml(user),
+    });
+    return true;
+  } catch (error) {
+    console.error('Welcome email delivery failed:', error.message);
+    return false;
+  }
+};
 
 const buildAuthUser = (user, options = {}) => {
   const impersonation = options.impersonation || { active: false };
@@ -141,6 +202,7 @@ exports.signup = async (req, res) => {
           req,
           authMethod: 'password',
         });
+        await sendWelcomeEmail(user);
         res.status(201).json(buildAuthResponse(user, token, session));
     } catch (err) {
         console.error("Signup error:", err);
@@ -336,6 +398,7 @@ exports.completeProfile = async (req, res) => {
 
     try {
       const user = await User.findById(req.user.id);
+      const wasProfileCompleted = Boolean(user?.profileCompletedAt);
 
       if (!user) {
         return res.status(404).json({ message: 'User not found.' });
@@ -355,6 +418,9 @@ exports.completeProfile = async (req, res) => {
       user.profileCompletedAt = now;
 
       await user.save();
+      if (!wasProfileCompleted) {
+        await sendWelcomeEmail(user);
+      }
 
       return res.json({
         message: 'Profile completed successfully.',

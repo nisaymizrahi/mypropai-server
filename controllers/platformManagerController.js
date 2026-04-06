@@ -30,6 +30,11 @@ const { issuePasswordResetForUser } = require('./authController');
 const { getStripeClient } = require('../lib/stripe');
 const { normalizeEmail } = require('../utils/platformAccess');
 const {
+  buildSupportRequestReferenceCode,
+  buildSupportStatusUpdateEmail,
+  getSupportReplyTo,
+} = require('../utils/supportRequestEmail');
+const {
   buildAuthProviders,
   buildConsentSummary,
   buildDisplayName,
@@ -292,9 +297,6 @@ const serializeSupportNote = (note) => ({
   createdAt: note.createdAt,
   updatedAt: note.updatedAt,
 });
-
-const buildSupportRequestReferenceCode = (requestId) =>
-  `SUP-${String(requestId).slice(-6).toUpperCase()}`;
 
 const serializeSupportRequest = (request, matchedUser = null) => ({
   id: request._id,
@@ -947,6 +949,8 @@ exports.updateSupportRequestStatus = async (req, res) => {
 
     const previousStatus = supportRequest.status || 'new';
     const reason = String(req.body.reason || '').trim();
+    const replyTo = getSupportReplyTo();
+    let statusEmailDelivered = false;
 
     supportRequest.status = status;
     await supportRequest.save();
@@ -972,6 +976,38 @@ exports.updateSupportRequestStatus = async (req, res) => {
       },
     });
 
+    if (
+      previousStatus !== status &&
+      process.env.SENDGRID_API_KEY &&
+      process.env.EMAIL_FROM &&
+      supportRequest.email
+    ) {
+      try {
+        await sendEmail({
+          to: supportRequest.email,
+          subject:
+            status === 'resolved'
+              ? `[${buildSupportRequestReferenceCode(supportRequest._id)}] Your Fliprop request was resolved`
+              : status === 'in_progress'
+                ? `[${buildSupportRequestReferenceCode(
+                    supportRequest._id
+                  )}] Your Fliprop request is in progress`
+                : `[${buildSupportRequestReferenceCode(
+                    supportRequest._id
+                  )}] Your Fliprop request was reopened`,
+          html: buildSupportStatusUpdateEmail(
+            supportRequest,
+            buildSupportRequestReferenceCode(supportRequest._id),
+            previousStatus
+          ),
+          replyTo,
+        });
+        statusEmailDelivered = true;
+      } catch (emailError) {
+        console.error('Support request status email failed:', emailError.message);
+      }
+    }
+
     return res.json({
       message:
         status === 'resolved'
@@ -979,6 +1015,7 @@ exports.updateSupportRequestStatus = async (req, res) => {
           : status === 'in_progress'
             ? 'Support request marked in progress.'
             : 'Support request reopened.',
+      statusEmailDelivered,
       request: serializeSupportRequest(supportRequest, matchedUser),
     });
   } catch (error) {

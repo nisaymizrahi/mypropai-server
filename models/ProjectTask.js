@@ -7,6 +7,11 @@ const ProjectTaskSchema = new mongoose.Schema({
     ref: 'Investment',
     required: true,
   },
+  budgetItem: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'BudgetItem',
+    default: null,
+  },
 
   // Whether this is a vendor-facing task or an owner/internal reminder
   type: {

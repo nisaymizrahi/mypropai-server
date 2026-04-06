@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { nanoid } = require('nanoid');
+const { buildBudgetScopeMeta } = require('../utils/projectScopes');
 
 const BudgetAwardSchema = new mongoose.Schema(
   {
@@ -68,6 +69,17 @@ const BudgetItemSchema = new mongoose.Schema({
     trim: true,
     default: '',
   },
+  scopeKey: {
+    type: String,
+    trim: true,
+    default: '',
+    index: true,
+  },
+  scopeGroup: {
+    type: String,
+    trim: true,
+    default: '',
+  },
   category: {
     type: String,
     required: [true, 'Please provide a budget category (e.g., Plumbing, Electrical).'],
@@ -97,5 +109,19 @@ const BudgetItemSchema = new mongoose.Schema({
   },
   awards: [BudgetAwardSchema],
 }, { timestamps: true });
+
+BudgetItemSchema.pre('validate', function syncScopeMetadata(next) {
+  const scopeMeta = buildBudgetScopeMeta({
+    scopeKey: this.scopeKey,
+    category: this.category,
+    description: this.description,
+  });
+
+  this.scopeKey = scopeMeta.scopeKey;
+  this.scopeGroup = scopeMeta.scopeGroup;
+  this.category = String(this.category || scopeMeta.defaultCategory || '').trim();
+
+  next();
+});
 
 module.exports = mongoose.model('BudgetItem', BudgetItemSchema);

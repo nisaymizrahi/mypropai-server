@@ -27,6 +27,16 @@ const BidRenovationAssignmentSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+  budgetItemId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'BudgetItem',
+    default: null,
+  },
+  budgetItemLabel: {
+    type: String,
+    trim: true,
+    default: '',
+  },
   amount: {
     type: Number,
   },
@@ -67,6 +77,27 @@ const BidVendorSnapshotSchema = new mongoose.Schema({
   },
 }, { _id: false });
 
+const BidAwardLinkSchema = new mongoose.Schema({
+  budgetItem: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'BudgetItem',
+    default: null,
+  },
+  awardId: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  amount: {
+    type: Number,
+    default: 0,
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+}, { _id: false });
+
 // This is the main schema for a single, complete bid from a contractor
 const BidSchema = new mongoose.Schema({
   // Link to the user who owns this bid
@@ -80,6 +111,12 @@ const BidSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Lead',
     required: true,
+  },
+  investment: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Investment',
+    default: null,
+    index: true,
   },
   vendor: {
     type: mongoose.Schema.Types.ObjectId,
@@ -113,6 +150,15 @@ const BidSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+  decisionStatus: {
+    type: String,
+    enum: ['open', 'awarded', 'archived'],
+    default: 'open',
+  },
+  awardedAt: {
+    type: Date,
+    default: null,
+  },
   notes: {
     type: String,
     trim: true,
@@ -122,6 +168,7 @@ const BidSchema = new mongoose.Schema({
   // The array of all line items parsed from the estimate
   items: [BidItemSchema],
   renovationAssignments: [BidRenovationAssignmentSchema],
+  awards: [BidAwardLinkSchema],
 }, { timestamps: true });
 
 module.exports = mongoose.model('Bid', BidSchema);

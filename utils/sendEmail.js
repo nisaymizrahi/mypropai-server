@@ -13,10 +13,13 @@ const sendEmail = async (options) => {
 
   // 2. Define the email options
   const mailOptions = {
-    from: `Fliprop <${process.env.EMAIL_FROM}>`,
+    from: options.from || `Fliprop <${process.env.EMAIL_FROM}>`,
     to: options.to,
     subject: options.subject,
     html: options.html,
+    text: options.text,
+    replyTo: options.replyTo,
+    headers: options.headers,
   };
 
   // 3. Actually send the email

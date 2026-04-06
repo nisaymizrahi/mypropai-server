@@ -10,7 +10,7 @@ const {
 const buildDefaultTitle = (address = "", generatedAt = new Date()) => {
   const safeAddress = String(address || "").trim() || "Property";
   const formattedDate = new Date(generatedAt).toLocaleDateString();
-  return `${safeAddress} - AI Comps Report - ${formattedDate}`;
+  return `${safeAddress} - Master Deal Report - ${formattedDate}`;
 };
 
 const formatCompsReportResponse = (report) => {

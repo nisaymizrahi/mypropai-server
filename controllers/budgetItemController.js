@@ -16,7 +16,9 @@ const toOptionalString = (value) => {
 };
 
 const populateBudgetItem = (query) =>
-  query.populate('awards.vendor', 'name trade specialties contactInfo');
+  query
+    .populate('awards.vendor', 'name trade specialties contactInfo')
+    .populate('awards.sourceBid', 'contractorName totalAmount decisionStatus sourceType vendor vendorSnapshot');
 
 const getAuthorizedInvestment = async (investmentId, userId) => {
   const investment = await Investment.findById(investmentId);
@@ -66,6 +68,7 @@ exports.createBudgetItem = async (req, res) => {
       status,
       dueDate,
       sourceRenovationItemId,
+      scopeKey,
     } = req.body;
 
     const investment = await getAuthorizedInvestment(investmentId, req.user.id);
@@ -88,6 +91,7 @@ exports.createBudgetItem = async (req, res) => {
       status: toOptionalString(status) || 'Not Started',
       dueDate: dueDate || undefined,
       sourceRenovationItemId: toOptionalString(sourceRenovationItemId),
+      scopeKey: toOptionalString(scopeKey),
       awards: [],
     });
 
@@ -136,6 +140,7 @@ exports.updateBudgetItem = async (req, res) => {
       status,
       dueDate,
       sourceRenovationItemId,
+      scopeKey,
     } = req.body;
 
     if (category !== undefined) budgetItem.category = toOptionalString(category);
@@ -155,6 +160,9 @@ exports.updateBudgetItem = async (req, res) => {
     if (dueDate !== undefined) budgetItem.dueDate = dueDate || undefined;
     if (sourceRenovationItemId !== undefined) {
       budgetItem.sourceRenovationItemId = toOptionalString(sourceRenovationItemId);
+    }
+    if (scopeKey !== undefined) {
+      budgetItem.scopeKey = toOptionalString(scopeKey);
     }
 
     await budgetItem.save();

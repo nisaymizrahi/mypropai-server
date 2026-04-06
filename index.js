@@ -20,6 +20,7 @@ require('./models/OperatingExpense');
 require('./models/TenantUser');
 require('./models/BudgetItem');
 require('./models/Expense');
+require('./models/ProjectReceipt');
 require('./models/Vendor');
 require('./models/ProjectTask');
 require('./models/ProjectDocument');
@@ -36,6 +37,7 @@ require('./models/PlatformAuditLog');
 require('./models/PlatformSupportNote');
 require('./models/Task');
 require('./models/PropertyReport');
+require('./models/PropertyCopilotIndex');
 require('./models/SupportRequest');
 // --- End of Model Registration ---
 
@@ -49,6 +51,7 @@ const tenantAuthRoutes = require("./routes/tenantAuthRoutes");
 const tenantRoutes = require("./routes/tenantRoutes"); 
 const budgetItemRoutes = require("./routes/budgetItemRoutes");
 const expenseRoutes = require("./routes/expenseRoutes");
+const projectReceiptRoutes = require("./routes/projectReceiptRoutes");
 const vendorRoutes = require("./routes/vendorRoutes");
 const projectTaskRoutes = require("./routes/projectTaskRoutes");
 const documentRoutes = require("./routes/documentRoutes");
@@ -68,6 +71,7 @@ const propertyReportRoutes = require("./routes/propertyReports");
 const platformManagerRoutes = require("./routes/platformManagerRoutes");
 const taskRoutes = require("./routes/taskRoutes");
 const supportRoutes = require("./routes/supportRoutes");
+const emailPreferencesRoutes = require("./routes/emailPreferencesRoutes");
 // 1. IMPORT THE NEW APPLICATION ROUTES
 const applicationRoutes = require("./routes/applicationRoutes");
 const billingController = require("./controllers/billingController");
@@ -85,6 +89,18 @@ app.disable("x-powered-by");
 
 // CORS Configuration
 const normalizeOrigin = (value) => value?.trim().replace(/\/+$/, "");
+const isAllowedLocalDevOrigin = (origin) => {
+  if (process.env.NODE_ENV === "production" || !origin) {
+    return false;
+  }
+
+  try {
+    const parsedOrigin = new URL(origin);
+    return ["localhost", "127.0.0.1"].includes(parsedOrigin.hostname);
+  } catch (error) {
+    return false;
+  }
+};
 
 const allowedOrigins = new Set([
   "https://mypropai.onrender.com",
@@ -101,13 +117,14 @@ const allowedOrigins = new Set([
 
 if (process.env.NODE_ENV !== 'production') {
   allowedOrigins.add('http://localhost:3000');
+  allowedOrigins.add('http://127.0.0.1:3000');
 }
 
 app.use(
   cors({
     origin: function (origin, callback) {
       const normalizedOrigin = normalizeOrigin(origin);
-      if (!origin || allowedOrigins.has(normalizedOrigin)) {
+      if (!origin || allowedOrigins.has(normalizedOrigin) || isAllowedLocalDevOrigin(normalizedOrigin)) {
         callback(null, true);
       } else {
         callback(new Error('The CORS policy for this site does not allow access from the specified Origin.'));
@@ -173,6 +190,7 @@ app.use("/api/tenant-auth", tenantAuthRoutes);
 app.use("/api/tenant", tenantRoutes);
 app.use("/api/budget-items", requireAuth, budgetItemRoutes);
 app.use("/api/expenses", requireAuth, expenseRoutes);
+app.use("/api/project-receipts", requireAuth, projectReceiptRoutes);
 app.use("/api/vendors", requireAuth, vendorRoutes);
 app.use("/api/project-tasks", requireAuth, projectTaskRoutes);
 app.use("/api/documents", requireAuth, documentRoutes);
@@ -192,6 +210,7 @@ app.use("/api/property-reports", requireAuth, propertyReportRoutes);
 app.use("/api/tasks", requireAuth, taskRoutes);
 app.use("/api/platform-manager", platformManagerRoutes);
 app.use("/api/support", supportRoutes);
+app.use("/api/email-preferences", emailPreferencesRoutes);
 // 2. USE THE NEW APPLICATION ROUTES
 app.use("/api/applications", applicationRoutes); // Note: Auth is handled inside the routes file
 

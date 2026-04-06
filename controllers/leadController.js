@@ -16,6 +16,7 @@ const { buildMasterDealReport } = require('../utils/masterDealReportService');
 const { consumeMatchingPurchase, getFeatureAccessState, recordFeatureUsage } = require('../utils/billingAccess');
 const { consumeOneCompsCredit } = require('../utils/compsCredits');
 const { upsertCanonicalProperty } = require('../utils/propertyRecordService');
+const { createExecutionProjectFromLead } = require('../utils/projectLifecycleService');
 
 const getOpenAIClient = () => {
   if (!process.env.OPENAI_API_KEY) {
@@ -818,76 +819,23 @@ exports.promoteLeadToProject = async (req, res) => {
       return res.status(400).json({ msg: 'Only Closed - Won leads can move into project management.' });
     }
 
-    let existingProject = null;
-    if (lead.projectManagement) {
-      existingProject = await Investment.findOne({
-        _id: lead.projectManagement,
-        user: req.user.id,
-      })
-        .populate('property')
-        .populate('sourceLead', 'address status projectManagement');
-    }
-
-    if (!existingProject) {
-      existingProject = await Investment.findOne({
-        user: req.user.id,
-        sourceLead: lead._id,
-      })
-        .populate('property')
-        .populate('sourceLead', 'address status projectManagement');
-    }
-
-    if (existingProject) {
-      if (!lead.projectManagement) {
-        lead.projectManagement = existingProject._id;
-        await lead.save();
-      }
-
-      return res.json(existingProject);
-    }
-
     const property = await upsertCanonicalProperty({
       userId: req.user.id,
       existingPropertyId: lead.property,
       source: lead,
     });
 
-    const project = await Investment.create({
-      user: req.user.id,
-      property: property?._id || null,
-      sourceLead: lead._id,
-      sourceLeadSnapshot: buildProjectLeadSnapshot(lead),
-      address: lead.address,
+    const { project, created } = await createExecutionProjectFromLead({
+      lead,
+      userId: req.user.id,
+      propertyId: property?._id || null,
       strategy: 'flip',
       type: 'flip',
       status: 'In Progress',
-      purchasePrice: numberOrNull(lead.targetOffer) ?? numberOrNull(lead.sellerAskingPrice) ?? 0,
-      arv: numberOrNull(lead.arv) ?? 0,
-      propertyType: lead.propertyType || '',
-      lotSize: numberOrNull(lead.lotSize) ?? undefined,
-      sqft: numberOrNull(lead.squareFootage) ?? undefined,
-      bedrooms: numberOrNull(lead.bedrooms) ?? undefined,
-      bathrooms: numberOrNull(lead.bathrooms) ?? undefined,
-      yearBuilt: numberOrNull(lead.yearBuilt) ?? undefined,
-      unitCount: numberOrNull(lead.unitCount) ?? undefined,
+      linkLead: true,
     });
 
-    const budgetItems = buildBudgetItemsFromLead(lead, project._id, req.user.id);
-    if (budgetItems.length > 0) {
-      await BudgetItem.insertMany(budgetItems);
-    }
-
-    lead.projectManagement = project._id;
-    if (property && String(lead.property || '') !== String(property._id)) {
-      lead.property = property._id;
-    }
-    await lead.save();
-
-    const populatedProject = await Investment.findById(project._id)
-      .populate('property')
-      .populate('sourceLead', 'address status projectManagement');
-
-    res.status(201).json(populatedProject);
+    res.status(created ? 201 : 200).json(project);
   } catch (error) {
     console.error('Promote lead to project error:', error);
     res.status(500).json({ msg: 'Server Error' });

@@ -1,5 +1,6 @@
 const ProjectTask = require('../models/ProjectTask');
 const Investment = require('../models/Investment');
+const BudgetItem = require('../models/BudgetItem');
 
 // Utility to update investment progress
 const updateInvestmentProgress = async (investmentId) => {
@@ -32,6 +33,23 @@ const getAuthorizedTask = async (taskId, userId) => {
   return { task, investment };
 };
 
+const getAuthorizedBudgetItem = async (budgetItemId, investmentId, userId) => {
+  if (!budgetItemId) {
+    return null;
+  }
+
+  const budgetItem = await BudgetItem.findById(budgetItemId);
+  if (
+    !budgetItem ||
+    String(budgetItem.user) !== String(userId) ||
+    String(budgetItem.investment) !== String(investmentId)
+  ) {
+    return null;
+  }
+
+  return budgetItem;
+};
+
 const normalizeSubtasks = (subtasks) =>
   Array.isArray(subtasks)
     ? subtasks
@@ -53,6 +71,7 @@ exports.createTask = async (req, res) => {
       endDate,
       status,
       assignee,
+      budgetItemId,
       type,
       phase,
       reminderOn,
@@ -69,8 +88,14 @@ exports.createTask = async (req, res) => {
       return res.status(401).json({ msg: 'Not authorized for this investment.' });
     }
 
+    const budgetItem = await getAuthorizedBudgetItem(budgetItemId, investmentId, req.user.id);
+    if (budgetItemId && !budgetItem) {
+      return res.status(400).json({ msg: 'Selected scope item was not found for this project.' });
+    }
+
     const newTask = new ProjectTask({
       investment: investmentId,
+      budgetItem: budgetItem?._id || null,
       title,
       description: description || '',
       startDate,
@@ -104,6 +129,7 @@ exports.getTasksForInvestment = async (req, res) => {
 
     const tasks = await ProjectTask.find({ investment: investmentId })
       .populate('assignee', 'name trade')
+      .populate('budgetItem', 'category scopeKey scopeGroup description')
       .sort({ startDate: 1 });
 
     res.json(tasks);
@@ -128,6 +154,7 @@ exports.updateTask = async (req, res) => {
       endDate,
       status,
       assignee,
+      budgetItemId,
       type,
       phase,
       reminderOn,
@@ -141,6 +168,17 @@ exports.updateTask = async (req, res) => {
     if (endDate !== undefined) task.endDate = endDate;
     if (status !== undefined) task.status = status;
     if (assignee !== undefined) task.assignee = assignee || undefined;
+    if (budgetItemId !== undefined) {
+      const budgetItem = await getAuthorizedBudgetItem(
+        budgetItemId,
+        String(task.investment),
+        req.user.id
+      );
+      if (budgetItemId && !budgetItem) {
+        return res.status(400).json({ msg: 'Selected scope item was not found for this project.' });
+      }
+      task.budgetItem = budgetItem?._id || null;
+    }
     if (type !== undefined) task.type = type;
     if (phase !== undefined) task.phase = phase;
     if (reminderOn !== undefined) task.reminderOn = reminderOn || undefined;

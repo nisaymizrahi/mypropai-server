@@ -1,6 +1,7 @@
 const Expense = require('../models/Expense');
 const Investment = require('../models/Investment');
 const BudgetItem = require('../models/BudgetItem');
+const ProjectReceipt = require('../models/ProjectReceipt');
 const Vendor = require('../models/Vendor');
 const cloudinary = require('cloudinary').v2;
 const OpenAI = require('openai');
@@ -63,8 +64,23 @@ const toExpenseRecurringCategory = (value) => {
   return EXPENSE_RECURRING_CATEGORY_VALUES.includes(normalized) ? normalized : '';
 };
 
+const toObjectIdOrNull = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === 'object' && value._id) {
+    return value._id;
+  }
+
+  return value;
+};
+
 const populateExpense = (query) =>
-  query.populate('vendor', 'name trade specialties contactInfo');
+  query
+    .populate('vendor', 'name trade specialties contactInfo')
+    .populate('budgetItem', 'category description scopeKey scopeGroup')
+    .populate('receiptRecord', 'status receiptUrl amount receiptDate createdAt');
 
 const getAuthorizedInvestment = async (investmentId, userId) => {
   const investment = await Investment.findById(investmentId);
@@ -87,6 +103,23 @@ const getAuthorizedExpense = async (expenseId, userId) => {
   }
 
   return { expense };
+};
+
+const getAuthorizedProjectReceipt = async (receiptId, userId, investmentId = '') => {
+  if (!receiptId) {
+    return null;
+  }
+
+  const receipt = await ProjectReceipt.findById(receiptId);
+  if (!receipt || String(receipt.user) !== String(userId)) {
+    return null;
+  }
+
+  if (investmentId && String(receipt.investment) !== String(investmentId)) {
+    return null;
+  }
+
+  return receipt;
 };
 
 const getAuthorizedBudgetItem = async (budgetItemId, investmentId, userId) => {
@@ -266,6 +299,83 @@ const buildExpensePayload = ({ body = {}, budgetItem = null }) => {
   };
 };
 
+const buildReceiptRecordPayload = ({
+  userId,
+  investmentId,
+  budgetItem = null,
+  payload = {},
+  file,
+  vendor = null,
+  payeeName = '',
+  expense = null,
+  status = 'reviewed',
+  extracted = null,
+  suggestedVendor = null,
+  suggestedBudgetItem = null,
+}) => ({
+  user: userId,
+  investment: investmentId,
+  budgetItem: toObjectIdOrNull(budgetItem),
+  expense: expense?._id || null,
+  vendor: vendor || null,
+  status,
+  title: payload.title || '',
+  description: payload.description || '',
+  payeeName: payeeName || '',
+  amount: payload.amount ?? null,
+  receiptDate: payload.date || null,
+  notes: payload.notes || '',
+  sourceFileName: file?.originalname || '',
+  contentType: file?.mimetype || '',
+  receiptUrl: file?.path,
+  receiptCloudinaryId: file?.filename,
+  extracted,
+  suggestedVendorSnapshot: suggestedVendor
+    ? {
+        _id: suggestedVendor._id,
+        name: suggestedVendor.name || '',
+        trade: suggestedVendor.trade || '',
+      }
+    : null,
+  suggestedBudgetItemSnapshot: suggestedBudgetItem
+    ? {
+        _id: suggestedBudgetItem._id,
+        category: suggestedBudgetItem.category || '',
+        description: suggestedBudgetItem.description || '',
+        scopeKey: suggestedBudgetItem.scopeKey || '',
+      }
+    : null,
+  linkedAt: status === 'linked' ? new Date() : null,
+});
+
+const syncProjectReceiptWithExpense = async ({
+  receiptRecord,
+  budgetItem = null,
+  payload = {},
+  vendor = null,
+  payeeName = '',
+  expense,
+}) => {
+  if (!receiptRecord || !expense) {
+    return null;
+  }
+
+  receiptRecord.status = 'linked';
+  receiptRecord.expense = expense._id;
+  receiptRecord.budgetItem = toObjectIdOrNull(budgetItem);
+  receiptRecord.vendor = vendor || null;
+  receiptRecord.title = payload.title || receiptRecord.title || '';
+  receiptRecord.description = payload.description || receiptRecord.description || '';
+  receiptRecord.payeeName = payeeName || receiptRecord.payeeName || '';
+  receiptRecord.amount = payload.amount ?? receiptRecord.amount ?? null;
+  receiptRecord.receiptDate = payload.date || receiptRecord.receiptDate || null;
+  receiptRecord.notes = payload.notes || receiptRecord.notes || '';
+  receiptRecord.linkedAt = new Date();
+
+  await receiptRecord.save();
+  return receiptRecord;
+};
+
 // @desc    Create a new expense for an investment
 exports.createExpense = async (req, res) => {
   try {
@@ -289,6 +399,14 @@ exports.createExpense = async (req, res) => {
     }
 
     const payload = buildExpensePayload({ body: req.body, budgetItem });
+    const receiptRecord = await getAuthorizedProjectReceipt(
+      toOptionalString(req.body.projectReceiptId || req.body.receiptRecordId),
+      req.user.id,
+      investmentId
+    );
+    if (isPresent(req.body.projectReceiptId || req.body.receiptRecordId) && !receiptRecord) {
+      return res.status(400).json({ msg: 'Selected receipt record was not found for this project.' });
+    }
     const financeLink = resolveFinanceLink({
       investment,
       fundingSourceId: payload.fundingSourceId,
@@ -326,14 +444,48 @@ exports.createExpense = async (req, res) => {
       notes: payload.notes,
       entryMethod: payload.entryMethod,
       receiptExtraction: payload.receiptExtraction,
+      receiptRecord: receiptRecord?._id || null,
     });
 
-    if (req.file) {
+    if (receiptRecord?.receiptUrl) {
+      newExpense.receiptUrl = receiptRecord.receiptUrl;
+      newExpense.receiptCloudinaryId = receiptRecord.receiptCloudinaryId;
+    } else if (req.file) {
       newExpense.receiptUrl = req.file.path;
       newExpense.receiptCloudinaryId = req.file.filename;
     }
 
     await newExpense.save();
+
+    if (receiptRecord) {
+      await syncProjectReceiptWithExpense({
+        receiptRecord,
+        budgetItem,
+        payload,
+        vendor: payload.vendor,
+        payeeName: payload.payeeName,
+        expense: newExpense,
+      });
+    } else if (req.file?.path) {
+      const createdReceipt = await ProjectReceipt.create(
+        buildReceiptRecordPayload({
+          userId: req.user.id,
+          investmentId,
+          budgetItem,
+          payload,
+          file: req.file,
+          vendor: payload.vendor,
+          payeeName: payload.payeeName,
+          expense: newExpense,
+          status: 'linked',
+          extracted: payload.receiptExtraction,
+        })
+      );
+
+      newExpense.receiptRecord = createdReceipt._id;
+      await newExpense.save();
+    }
+
     const populatedExpense = await populateExpense(Expense.findById(newExpense._id));
     res.status(201).json(populatedExpense);
   } catch (error) {
@@ -434,19 +586,42 @@ ${JSON.stringify(
     const parsed = JSON.parse(completion.choices[0].message.content || '{}');
     const suggestedVendor = findSuggestedVendor(vendors, parsed.vendorName);
     const suggestedBudgetItem = findSuggestedBudgetItem(budgetItems, parsed.budgetItemHint);
+    const extracted = {
+      title: toOptionalString(parsed.title || parsed.description),
+      description: toOptionalString(parsed.description),
+      vendorName: toOptionalString(parsed.vendorName),
+      amount: toOptionalNumber(parsed.amount),
+      expenseDate: toOptionalString(parsed.expenseDate),
+      budgetItemHint: toOptionalString(parsed.budgetItemHint),
+      notes: toOptionalString(parsed.notes),
+    };
+    const parsedExpenseDate = parseOptionalDate(extracted.expenseDate) || null;
+    const receiptRecord = await ProjectReceipt.create(
+      buildReceiptRecordPayload({
+        userId: req.user.id,
+        investmentId,
+        budgetItem: suggestedBudgetItem,
+        payload: {
+          title: extracted.title,
+          description: extracted.description,
+          amount: extracted.amount,
+          date: parsedExpenseDate,
+          notes: extracted.notes,
+        },
+        file: req.file,
+        vendor: suggestedVendor?._id || null,
+        payeeName: extracted.vendorName,
+        extracted,
+        suggestedVendor,
+        suggestedBudgetItem,
+      })
+    );
 
     res.json({
+      receiptRecordId: receiptRecord._id,
       receiptUrl: req.file.path,
       receiptCloudinaryId: req.file.filename,
-      extracted: {
-        title: toOptionalString(parsed.title || parsed.description),
-        description: toOptionalString(parsed.description),
-        vendorName: toOptionalString(parsed.vendorName),
-        amount: toOptionalNumber(parsed.amount),
-        expenseDate: toOptionalString(parsed.expenseDate),
-        budgetItemHint: toOptionalString(parsed.budgetItemHint),
-        notes: toOptionalString(parsed.notes),
-      },
+      extracted,
       suggestedVendor: suggestedVendor
         ? {
             _id: suggestedVendor._id,
@@ -577,6 +752,29 @@ exports.updateExpense = async (req, res) => {
     }
 
     await expense.save();
+
+    if (expense.receiptRecord) {
+      const receiptRecord = await getAuthorizedProjectReceipt(
+        expense.receiptRecord,
+        req.user.id,
+        String(expense.investment)
+      );
+      await syncProjectReceiptWithExpense({
+        receiptRecord,
+        budgetItem: hasBudgetItemInput ? budgetItem : expense.budgetItem,
+        payload: {
+          title: expense.title,
+          description: expense.description,
+          amount: expense.amount,
+          date: expense.date,
+          notes: expense.notes,
+        },
+        vendor: expense.vendor,
+        payeeName: expense.payeeName,
+        expense,
+      });
+    }
+
     const populatedExpense = await populateExpense(Expense.findById(expense._id));
     res.json(populatedExpense);
   } catch (error) {
@@ -593,7 +791,20 @@ exports.deleteExpense = async (req, res) => {
       return res.status(error.status).json({ msg: error.msg });
     }
 
-    if (expense.receiptCloudinaryId) {
+    if (expense.receiptRecord) {
+      const receiptRecord = await getAuthorizedProjectReceipt(
+        expense.receiptRecord,
+        req.user.id,
+        String(expense.investment)
+      );
+
+      if (receiptRecord) {
+        receiptRecord.expense = null;
+        receiptRecord.status = 'reviewed';
+        receiptRecord.linkedAt = null;
+        await receiptRecord.save();
+      }
+    } else if (expense.receiptCloudinaryId) {
       await cloudinary.uploader.destroy(expense.receiptCloudinaryId);
     }
 
