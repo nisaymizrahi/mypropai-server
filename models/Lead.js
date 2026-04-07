@@ -67,6 +67,7 @@ const LeadSchema = new mongoose.Schema({
     listingId: { type: String, trim: true },
     listingType: { type: String, trim: true },
     url: { type: String, trim: true },
+    linkType: { type: String, trim: true },
     importSource: { type: String, trim: true },
     importedAt: { type: Date },
     status: { type: String, trim: true },
@@ -77,6 +78,29 @@ const LeadSchema = new mongoose.Schema({
     primaryPhotoUrl: { type: String, trim: true },
     photoCount: { type: Number },
     snapshot: { type: mongoose.Schema.Types.Mixed, default: null },
+  },
+  marketSearchAssessment: {
+    searchedAt: { type: Date },
+    brief: {
+      strategy: { type: String, trim: true },
+      objective: { type: String, trim: true },
+      renovationPreference: { type: String, trim: true },
+      minPrice: { type: Number },
+      maxPrice: { type: Number },
+      assetTypes: [{ type: String, trim: true }],
+    },
+    match: {
+      score: { type: Number },
+      verdict: { type: String, trim: true },
+      strategyFit: { type: String, trim: true },
+      renovationFit: { type: String, trim: true },
+      summary: { type: String, trim: true },
+      reasons: [{ type: String, trim: true }],
+      riskFlags: [{ type: String, trim: true }],
+      nextStep: { type: String, trim: true },
+      rentEstimate: { type: mongoose.Schema.Types.Mixed, default: null },
+      valueEstimate: { type: mongoose.Schema.Types.Mixed, default: null },
+    },
   },
   // The stage of the deal in your pipeline.
   status: {

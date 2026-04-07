@@ -76,6 +76,7 @@ const marketSearchRoutes = require("./routes/marketSearch");
 // 1. IMPORT THE NEW APPLICATION ROUTES
 const applicationRoutes = require("./routes/applicationRoutes");
 const billingController = require("./controllers/billingController");
+const marketSearchController = require("./controllers/marketSearchController");
 const stripeController = require("./controllers/stripeController");
 const requireAuth = require("./middleware/requireAuth");
 const { getJwtSecret } = require("./utils/jwtConfig");
@@ -161,6 +162,8 @@ app.post(
   express.raw({ type: "application/json" }),
   stripeController.handleWebhook
 );
+
+app.get("/api/market-search/health", marketSearchController.getMarketSearchHealth);
 
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());

@@ -2,6 +2,11 @@ const Lead = require('../models/Lead');
 const Property = require('../models/Property');
 const { getLeadPropertyPreview, numberOrNull } = require('../utils/leadPropertyService');
 const { fetchSaleListingSnapshot, normalizeSaleListing, searchSaleListings } = require('../utils/marketSearchService');
+const {
+  buildSourceLink,
+  getMarketSearchHealthStatus,
+  searchDealMatches,
+} = require('../utils/marketDealSearchService');
 const { upsertCanonicalProperty } = require('../utils/propertyRecordService');
 
 const normalizeString = (value) => {
@@ -49,6 +54,8 @@ const buildImportedSourceListing = ({
   importedAt: new Date(),
   status: listing.status || '',
   price: numberOrNull(listing.price),
+  url: listing.sourceUrl || '',
+  linkType: listing.sourceLinkType || '',
   listedDate: toDateOrNull(listing.listedDate),
   removedDate: toDateOrNull(listing.removedDate),
   daysOnMarket: numberOrNull(listing.daysOnMarket),
@@ -62,6 +69,7 @@ const buildLeadDraftFromListing = ({
   rawListing,
   leadSource,
   importSource,
+  marketSearchAssessment,
 }) => ({
   address: listing.address,
   addressLine1: listing.addressLine1 || '',
@@ -95,6 +103,7 @@ const buildLeadDraftFromListing = ({
   }),
   externalListingProvider: listing.provider,
   externalListingId: listing.listingId,
+  marketSearchAssessment: marketSearchAssessment || undefined,
 });
 
 const buildLeadResponse = (lead) => ({
@@ -108,9 +117,12 @@ const buildLeadResponse = (lead) => ({
     ? {
         provider: lead.sourceListing.provider || '',
         listingId: lead.sourceListing.listingId || '',
+        url: lead.sourceListing.url || '',
+        linkType: lead.sourceListing.linkType || '',
         importedAt: lead.sourceListing.importedAt || null,
       }
     : null,
+  marketSearchAssessment: lead.marketSearchAssessment || null,
 });
 
 const buildImportResponse = ({ lead, propertyId, created, duplicateReason = '' }) => ({
@@ -135,6 +147,14 @@ const syncImportedListingToLead = async ({ lead, propertyId, draft }) => {
     lead.sourceListing.snapshot = draft.sourceListing.snapshot;
   }
 
+  if (!lead.sourceListing?.url && draft.sourceListing?.url) {
+    lead.sourceListing.url = draft.sourceListing.url;
+  }
+
+  if (!lead.sourceListing?.linkType && draft.sourceListing?.linkType) {
+    lead.sourceListing.linkType = draft.sourceListing.linkType;
+  }
+
   if (!lead.sellerAskingPrice && draft.sellerAskingPrice) {
     lead.sellerAskingPrice = draft.sellerAskingPrice;
   }
@@ -149,6 +169,10 @@ const syncImportedListingToLead = async ({ lead, propertyId, draft }) => {
 
   if ((lead.daysOnMarket === null || lead.daysOnMarket === undefined) && draft.daysOnMarket !== null) {
     lead.daysOnMarket = draft.daysOnMarket;
+  }
+
+  if (draft.marketSearchAssessment) {
+    lead.marketSearchAssessment = draft.marketSearchAssessment;
   }
 
   await lead.save();
@@ -234,6 +258,10 @@ const attachImportedLeadStatus = async (userId, listings = []) => {
   });
 };
 
+exports.getMarketSearchHealth = (req, res) => {
+  res.status(200).json(getMarketSearchHealthStatus());
+};
+
 exports.searchSaleListings = async (req, res) => {
   try {
     const result = await searchSaleListings(req.body || {});
@@ -249,11 +277,26 @@ exports.searchSaleListings = async (req, res) => {
   }
 };
 
+exports.searchDealMatches = async (req, res) => {
+  try {
+    const result = await searchDealMatches(req.body || {});
+    const results = await attachImportedLeadStatus(req.user.id, result.results);
+
+    res.json({
+      results,
+      meta: result.meta,
+    });
+  } catch (error) {
+    console.error('AI market deal search error:', error.response?.data || error.message);
+    res.status(500).json({ msg: error.message || 'Failed to analyze the market search brief.' });
+  }
+};
+
 exports.importSaleListing = async (req, res) => {
   try {
     const provider = normalizeString(req.body?.provider || 'rentcast').toLowerCase();
     const listingId = normalizeString(req.body?.listingId);
-    const leadSource = normalizeString(req.body?.leadSource) || 'rentcast_map_search';
+    const leadSource = normalizeString(req.body?.leadSource) || 'rentcast_ai_market_search';
     const importSource = 'market_search';
 
     if (provider !== 'rentcast') {
@@ -266,10 +309,26 @@ exports.importSaleListing = async (req, res) => {
 
     const rawListing = await fetchSaleListingSnapshot(provider, listingId).catch(() => null);
     const normalizedListing = normalizeSaleListing(rawListing || req.body?.listing || {});
+    const sourceLink = buildSourceLink(rawListing || req.body?.listing || {}, {
+      ...normalizedListing,
+      sourceUrl: req.body?.listing?.sourceUrl,
+      sourceLinkType: req.body?.listing?.sourceLinkType,
+    });
+    normalizedListing.sourceUrl = req.body?.listing?.sourceUrl || sourceLink.sourceUrl;
+    normalizedListing.sourceLinkType = req.body?.listing?.sourceLinkType || sourceLink.sourceLinkType;
 
     if (!normalizedListing.address) {
       return res.status(404).json({ msg: 'Sale listing not found.' });
     }
+
+    const marketSearchAssessment =
+      req.body?.marketSearchAssessment && typeof req.body.marketSearchAssessment === 'object'
+        ? {
+            searchedAt: new Date(),
+            brief: req.body.marketSearchAssessment.brief || {},
+            match: req.body.marketSearchAssessment.match || {},
+          }
+        : null;
 
     const preview = await getLeadPropertyPreview({
       ...normalizedListing,
@@ -282,6 +341,7 @@ exports.importSaleListing = async (req, res) => {
         rawListing,
         leadSource,
         importSource,
+        marketSearchAssessment,
       }),
       preview || {}
     );
@@ -358,4 +418,10 @@ exports.importSaleListing = async (req, res) => {
     console.error('Market import error:', error);
     res.status(500).json({ msg: 'Failed to add the property to Potential Properties.' });
   }
+};
+
+exports.__private = {
+  buildImportedSourceListing,
+  buildLeadDraftFromListing,
+  syncImportedListingToLead,
 };
