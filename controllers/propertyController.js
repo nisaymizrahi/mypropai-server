@@ -1,5 +1,6 @@
 const Lead = require('../models/Lead');
 const Investment = require('../models/Investment');
+const ProjectUpdate = require('../models/ProjectUpdate');
 const {
   fetchPropertyGroupsForUser,
   findPropertyGroupForUser,
@@ -124,6 +125,65 @@ const buildLeadPayload = (userId, property, input = {}) => {
   });
 
   return payload;
+};
+
+const projectUpdateTypes = new Set([
+  'internal_note',
+  'site_visit',
+  'issue',
+  'vendor_update',
+  'lender_update',
+]);
+
+const normalizeProjectUpdateType = (value) =>
+  projectUpdateTypes.has(String(value || '').trim()) ? String(value).trim() : 'internal_note';
+
+const buildProjectUpdateAuthorName = (user = {}) => {
+  const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
+  return fullName || user.companyName || user.email || 'Team member';
+};
+
+const buildProjectUpdateAttachment = (file) => {
+  if (!file) {
+    return null;
+  }
+
+  return {
+    url: file.path || file.secure_url || '',
+    publicId: file.filename || file.public_id || '',
+    originalName: file.originalname || '',
+    mimeType: file.mimetype || '',
+    resourceType: file.resource_type || '',
+    bytes: typeof file.size === 'number' ? file.size : null,
+  };
+};
+
+const buildProjectUpdatePayload = ({ req, propertyGroup, existingUpdate = null }) => {
+  const title = optionalString(req.body?.title);
+  const body = optionalString(req.body?.body);
+  const removeAttachment = String(req.body?.removeAttachment || '').toLowerCase() === 'true';
+  const nextAttachment = req.file
+    ? buildProjectUpdateAttachment(req.file)
+    : removeAttachment
+      ? null
+      : existingUpdate?.attachment || null;
+
+  return {
+    user: req.user.id,
+    propertyKey: propertyGroup.propertyKey,
+    property:
+      propertyGroup?.canonicalProperty?._id ||
+      propertyGroup?.investments?.[0]?.property ||
+      propertyGroup?.leads?.[0]?.property ||
+      null,
+    investment: propertyGroup?.investments?.[0]?._id || null,
+    type: normalizeProjectUpdateType(req.body?.type),
+    title,
+    body,
+    authorId: req.user.id,
+    authorName: buildProjectUpdateAuthorName(req.user),
+    attachment: nextAttachment,
+  };
 };
 
 const buildInvestmentPayload = ({
@@ -415,6 +475,118 @@ exports.updatePropertyProfile = async (req, res) => {
   } catch (error) {
     console.error('Update property workspace error:', error);
     res.status(500).json({ msg: 'Failed to update the shared property profile.' });
+  }
+};
+
+exports.getProjectUpdates = async (req, res) => {
+  try {
+    const property = await findPropertyGroupForUser(req.user.id, req.params.propertyKey);
+    if (!property) {
+      return res.status(404).json({ msg: 'Property not found.' });
+    }
+
+    const updates = await ProjectUpdate.find({
+      user: req.user.id,
+      propertyKey: property.propertyKey,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.json(updates);
+  } catch (error) {
+    console.error('Get project updates error:', error);
+    return res.status(500).json({ msg: 'Failed to load project updates.' });
+  }
+};
+
+exports.createProjectUpdate = async (req, res) => {
+  try {
+    const property = await findPropertyGroupForUser(req.user.id, req.params.propertyKey);
+    if (!property) {
+      return res.status(404).json({ msg: 'Property not found.' });
+    }
+
+    const payload = buildProjectUpdatePayload({ req, propertyGroup: property });
+
+    if (!payload.title || !payload.body) {
+      return res.status(400).json({ msg: 'Update title and body are required.' });
+    }
+
+    const update = await ProjectUpdate.create(payload);
+    return res.status(201).json(update);
+  } catch (error) {
+    console.error('Create project update error:', error);
+    return res.status(500).json({ msg: 'Failed to create the project update.' });
+  }
+};
+
+exports.updateProjectUpdate = async (req, res) => {
+  try {
+    const property = await findPropertyGroupForUser(req.user.id, req.params.propertyKey);
+    if (!property) {
+      return res.status(404).json({ msg: 'Property not found.' });
+    }
+
+    const existingUpdate = await ProjectUpdate.findOne({
+      _id: req.params.updateId,
+      user: req.user.id,
+      propertyKey: property.propertyKey,
+    });
+
+    if (!existingUpdate) {
+      return res.status(404).json({ msg: 'Project update not found.' });
+    }
+
+    const payload = buildProjectUpdatePayload({
+      req,
+      propertyGroup: property,
+      existingUpdate,
+    });
+
+    if (!payload.title || !payload.body) {
+      return res.status(400).json({ msg: 'Update title and body are required.' });
+    }
+
+    existingUpdate.type = payload.type;
+    existingUpdate.title = payload.title;
+    existingUpdate.body = payload.body;
+    existingUpdate.authorId = payload.authorId;
+    existingUpdate.authorName = payload.authorName;
+    existingUpdate.attachment = payload.attachment;
+    existingUpdate.editedAt = new Date();
+    existingUpdate.property = payload.property;
+    existingUpdate.investment = payload.investment;
+
+    await existingUpdate.save();
+
+    return res.json(existingUpdate);
+  } catch (error) {
+    console.error('Update project update error:', error);
+    return res.status(500).json({ msg: 'Failed to update the project update.' });
+  }
+};
+
+exports.deleteProjectUpdate = async (req, res) => {
+  try {
+    const property = await findPropertyGroupForUser(req.user.id, req.params.propertyKey);
+    if (!property) {
+      return res.status(404).json({ msg: 'Property not found.' });
+    }
+
+    const deletedUpdate = await ProjectUpdate.findOneAndDelete({
+      _id: req.params.updateId,
+      user: req.user.id,
+      propertyKey: property.propertyKey,
+    });
+
+    if (!deletedUpdate) {
+      return res.status(404).json({ msg: 'Project update not found.' });
+    }
+
+    return res.json({ msg: 'Project update deleted.' });
+  } catch (error) {
+    console.error('Delete project update error:', error);
+    return res.status(500).json({ msg: 'Failed to delete the project update.' });
   }
 };
 

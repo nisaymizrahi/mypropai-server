@@ -39,6 +39,7 @@ require('./models/Task');
 require('./models/PropertyReport');
 require('./models/PropertyCopilotIndex');
 require('./models/SupportRequest');
+require('./models/ProjectUpdate');
 // --- End of Model Registration ---
 
 // --- Route Imports ---
