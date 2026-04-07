@@ -138,6 +138,22 @@ const LeadSchema = new mongoose.Schema({
     contractorNotes: { type: String, trim: true },
     additionalNotes: { type: String, trim: true },
   },
+  projectAnalysis: {
+    selectedScenarioId: { type: String, trim: true, default: "" },
+    aiSummary: { type: String, trim: true, default: "" },
+    lastAiUpdatedAt: { type: Date, default: null },
+    scenarios: [{
+      scenarioId: { type: String, trim: true },
+      label: { type: String, trim: true },
+      strategyType: { type: String, trim: true },
+      rehabEstimate: { type: Number },
+      arv: { type: Number },
+      extensionPlanned: { type: Boolean, default: false },
+      extensionSquareFootage: { type: Number },
+      holdingMonths: { type: Number },
+      notes: { type: String, trim: true },
+    }],
+  },
   compsAnalysis: {
     generatedAt: { type: Date },
     filters: {

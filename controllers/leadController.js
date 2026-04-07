@@ -67,6 +67,7 @@ const stageLeadFields = [
   'notes',
   'status',
   'renovationPlan',
+  'projectAnalysis',
 ];
 
 const numericLeadFields = new Set([
@@ -198,6 +199,69 @@ const sanitizeRenovationPlan = (input = {}) => {
     extensionPlanned: booleanFromInput(input.extensionPlanned) || false,
     extensionSquareFootage: numberOrNull(input.extensionSquareFootage),
     items: legacyItems,
+  };
+};
+
+const buildProjectAnalysisScenarioId = (index = 0) =>
+  `scenario-${Date.now().toString(36)}-${index.toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+
+const sanitizeProjectAnalysisScenarios = (input = []) => {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .map((scenario, index) => {
+      if (!scenario || typeof scenario !== 'object' || Array.isArray(scenario)) {
+        return null;
+      }
+
+      const label =
+        typeof scenario.label === 'string' && scenario.label.trim()
+          ? scenario.label.trim()
+          : `Scenario ${index + 1}`;
+
+      return {
+        scenarioId:
+          typeof scenario.scenarioId === 'string' && scenario.scenarioId.trim()
+            ? scenario.scenarioId.trim()
+            : buildProjectAnalysisScenarioId(index),
+        label,
+        strategyType:
+          typeof scenario.strategyType === 'string' ? scenario.strategyType.trim() : '',
+        rehabEstimate: numberOrNull(scenario.rehabEstimate),
+        arv: numberOrNull(scenario.arv),
+        extensionPlanned: booleanFromInput(scenario.extensionPlanned) || false,
+        extensionSquareFootage: numberOrNull(scenario.extensionSquareFootage),
+        holdingMonths: numberOrNull(scenario.holdingMonths),
+        notes: typeof scenario.notes === 'string' ? scenario.notes.trim() : '',
+      };
+    })
+    .filter(Boolean);
+};
+
+const sanitizeProjectAnalysis = (input = {}) => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+
+  const scenarios = sanitizeProjectAnalysisScenarios(input.scenarios);
+  const selectedScenarioId =
+    typeof input.selectedScenarioId === 'string' ? input.selectedScenarioId.trim() : '';
+  const hasSelectedScenario = scenarios.some(
+    (scenario) => scenario.scenarioId === selectedScenarioId
+  );
+
+  return {
+    selectedScenarioId:
+      selectedScenarioId && hasSelectedScenario
+        ? selectedScenarioId
+        : scenarios[0]?.scenarioId || '',
+    aiSummary: typeof input.aiSummary === 'string' ? input.aiSummary.trim() : '',
+    lastAiUpdatedAt: input.lastAiUpdatedAt ? new Date(input.lastAiUpdatedAt) : null,
+    scenarios,
   };
 };
 
@@ -420,6 +484,11 @@ const buildLeadUpdates = (input = {}, { includeSharedFields = true } = {}) => {
       return;
     }
 
+    if (field === 'projectAnalysis') {
+      updates[field] = sanitizeProjectAnalysis(value);
+      return;
+    }
+
     if (numericLeadFields.has(field)) {
       updates[field] = numberOrNull(value);
       return;
@@ -498,6 +567,7 @@ const buildPublicLeadSnapshot = (lead) => ({
   status: lead.status,
   inPropertyWorkspace: Boolean(lead.inPropertyWorkspace),
   renovationPlan: lead.renovationPlan,
+  projectAnalysis: cloneSerializable(lead.projectAnalysis || null),
 });
 
 const cloneSerializable = (value) =>

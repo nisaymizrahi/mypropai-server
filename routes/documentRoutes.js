@@ -9,6 +9,7 @@ router.use(requireAuth);
 router.get('/storage/overview', documentStorageController.getStorageOverview);
 router.get('/storage/assets/:assetId/access', documentStorageController.getAssetAccessUrl);
 router.post('/', uploadDocumentToMemory.single('document'), documentController.uploadDocument);
+router.get('/lead/:leadId', documentController.getDocumentsForLead);
 router.get('/investment/:investmentId', documentController.getDocumentsForInvestment);
 router.delete('/:id', documentController.deleteDocument);
 

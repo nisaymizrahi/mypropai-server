@@ -1,5 +1,7 @@
 const ProjectDocument = require('../models/ProjectDocument');
 const Investment = require('../models/Investment');
+const Lead = require('../models/Lead');
+const LeadDocument = require('../models/LeadDocument');
 const DocumentAsset = require('../models/DocumentAsset');
 const {
     createDocumentAsset,
@@ -83,55 +85,120 @@ const resolveFinanceLink = ({ investment, fundingSourceId, drawRequestId }) => {
     };
 };
 
+const findDocumentRecordById = async (documentId) => {
+    const projectDocument = await ProjectDocument.findById(documentId);
+    if (projectDocument) {
+        return {
+            document: projectDocument,
+            kind: 'project',
+            relatedRecordId: projectDocument.investment,
+        };
+    }
+
+    const leadDocument = await LeadDocument.findById(documentId);
+    if (leadDocument) {
+        return {
+            document: leadDocument,
+            kind: 'lead',
+            relatedRecordId: leadDocument.lead,
+        };
+    }
+
+    return null;
+};
+
 // @desc    Upload a new document
 exports.uploadDocument = async (req, res) => {
     try {
-        const { investmentId, displayName, category, fundingSourceId, drawRequestId } = req.body;
+        const {
+            investmentId,
+            leadId,
+            displayName,
+            category,
+            fundingSourceId,
+            drawRequestId,
+        } = req.body;
+        const hasInvestmentTarget = Boolean(investmentId);
+        const hasLeadTarget = Boolean(leadId);
 
         if (!req.file) {
             return res.status(400).json({ msg: 'No file uploaded.' });
         }
-        if (!investmentId || !displayName) {
-            return res.status(400).json({ msg: 'Investment ID and Display Name are required.' });
+        if (!displayName || (!hasInvestmentTarget && !hasLeadTarget)) {
+            return res.status(400).json({ msg: 'A target record and display name are required.' });
+        }
+        if (hasInvestmentTarget && hasLeadTarget) {
+            return res.status(400).json({ msg: 'Choose either a project or a lead for this upload.' });
         }
 
-        // Verify the parent investment exists and belongs to the user
-        const investment = await Investment.findById(investmentId);
-        if (!investment || investment.user.toString() !== req.user.id) {
-            return res.status(401).json({ msg: 'Not authorized for this investment.' });
-        }
+        let relatedEntityType = '';
+        let relatedEntityId = '';
+        let relatedRefs = {};
+        let source = '';
+        let newDocument = null;
 
-        const financeLink = resolveFinanceLink({
-            investment,
-            fundingSourceId,
-            drawRequestId,
-        });
+        if (hasInvestmentTarget) {
+            const investment = await Investment.findById(investmentId);
+            if (!investment || investment.user.toString() !== req.user.id) {
+                return res.status(401).json({ msg: 'Not authorized for this investment.' });
+            }
 
-        if (financeLink.error) {
-            return res.status(400).json({ msg: financeLink.error });
+            const financeLink = resolveFinanceLink({
+                investment,
+                fundingSourceId,
+                drawRequestId,
+            });
+
+            if (financeLink.error) {
+                return res.status(400).json({ msg: financeLink.error });
+            }
+
+            relatedEntityType = 'investment';
+            relatedEntityId = investmentId;
+            relatedRefs = { investment: investmentId };
+            source = 'project_document';
+
+            newDocument = new ProjectDocument({
+                investment: investmentId,
+                user: req.user.id,
+                ownerAccount: req.user.id,
+                displayName,
+                category,
+                fundingSourceId: financeLink.fundingSourceId,
+                drawRequestId: financeLink.drawRequestId,
+            });
+        } else {
+            const lead = await Lead.findById(leadId);
+            if (!lead || lead.user.toString() !== req.user.id) {
+                return res.status(401).json({ msg: 'Not authorized for this lead.' });
+            }
+
+            relatedEntityType = 'lead';
+            relatedEntityId = leadId;
+            relatedRefs = { lead: leadId };
+            source = 'lead_document';
+
+            newDocument = new LeadDocument({
+                lead: leadId,
+                user: req.user.id,
+                ownerAccount: req.user.id,
+                displayName,
+                category,
+            });
         }
 
         const { asset } = await createDocumentAsset({
             user: req.user,
             file: req.file,
             displayName,
-            source: 'project_document',
+            source,
             documentCategory: category || 'General',
-            relatedEntityType: 'investment',
-            relatedEntityId: investmentId,
-            relatedRefs: {
-                investment: investmentId,
-            },
+            relatedEntityType,
+            relatedEntityId,
+            relatedRefs,
         });
 
-        const newDocument = new ProjectDocument({
-            investment: investmentId,
-            user: req.user.id,
-            ownerAccount: req.user.id,
-            displayName,
-            category,
-            fundingSourceId: financeLink.fundingSourceId,
-            drawRequestId: financeLink.drawRequestId,
+        Object.assign(newDocument, {
             documentAsset: asset._id,
             fileUrl: asset.secureUrl,
             cloudinaryId: asset.publicId,
@@ -195,10 +262,29 @@ exports.getDocumentsForInvestment = async (req, res) => {
     }
 };
 
+// @desc    Get all documents for a specific lead
+exports.getDocumentsForLead = async (req, res) => {
+    try {
+        const { leadId } = req.params;
+
+        const lead = await Lead.findById(leadId);
+        if (!lead || lead.user.toString() !== req.user.id) {
+            return res.status(401).json({ msg: 'Not authorized to view these documents.' });
+        }
+
+        const documents = await LeadDocument.find({ lead: leadId }).sort({ createdAt: -1 });
+        res.json(documents);
+    } catch (error) {
+        console.error('Error fetching lead documents:', error);
+        res.status(500).json({ msg: 'Server Error' });
+    }
+};
+
 // @desc    Delete a document
 exports.deleteDocument = async (req, res) => {
     try {
-        const document = await ProjectDocument.findById(req.params.id);
+        const documentRecord = await findDocumentRecordById(req.params.id);
+        const document = documentRecord?.document;
 
         if (!document) {
             return res.status(404).json({ msg: 'Document not found.' });

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const leadController = require('../controllers/leadController');
+const leadProjectAnalysisController = require('../controllers/leadProjectAnalysisController');
 const requireAuth = require('../middleware/requireAuth');
 
 // All routes in this file are protected
@@ -40,6 +41,10 @@ router.delete('/:id', leadController.deleteLead);
 // @route   POST /api/leads/:id/analyze-comps
 // @desc    Run the AI comps analysis for a specific lead
 router.post('/:id/analyze-comps', leadController.analyzeComps);
+
+// @route   POST /api/leads/:id/project-analysis/copilot
+// @desc    Get draft scenario guidance for the lead project analysis workspace
+router.post('/:id/project-analysis/copilot', leadProjectAnalysisController.respond);
 
 
 module.exports = router;
