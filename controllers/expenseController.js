@@ -5,6 +5,7 @@ const ProjectReceipt = require('../models/ProjectReceipt');
 const Vendor = require('../models/Vendor');
 const cloudinary = require('cloudinary').v2;
 const OpenAI = require('openai');
+const { resolvePaymentClassification } = require('../utils/paymentTaxonomy');
 
 const LEGACY_PRIMARY_FUNDING_SOURCE_ID = 'legacy-primary-funding-source';
 const EXPENSE_STATUS_VALUES = ['draft', 'approved', 'paid', 'reimbursed'];
@@ -279,6 +280,18 @@ const buildExpensePayload = ({ body = {}, budgetItem = null }) => {
     }
   }
 
+  const recurringCategory = toExpenseRecurringCategory(body.recurringCategory);
+  const paymentClassification = resolvePaymentClassification({
+    costClass: body.costClass,
+    costType: body.costType,
+    title,
+    description,
+    recurringCategory,
+    budgetItem,
+    awardId,
+    payeeName: inferredPayeeName,
+  });
+
   return {
     budgetItem: budgetItem?._id || null,
     awardId,
@@ -286,7 +299,9 @@ const buildExpensePayload = ({ body = {}, budgetItem = null }) => {
     drawRequestId: toOptionalString(body.drawRequestId),
     status: toExpenseStatus(body.status),
     paymentMethod: toExpensePaymentMethod(body.paymentMethod),
-    recurringCategory: toExpenseRecurringCategory(body.recurringCategory),
+    recurringCategory,
+    costClass: paymentClassification.costClass,
+    costType: paymentClassification.costType,
     title,
     description,
     amount,
@@ -376,6 +391,18 @@ const syncProjectReceiptWithExpense = async ({
   return receiptRecord;
 };
 
+const releaseProjectReceipt = async (receiptRecord) => {
+  if (!receiptRecord) {
+    return null;
+  }
+
+  receiptRecord.expense = null;
+  receiptRecord.status = 'reviewed';
+  receiptRecord.linkedAt = null;
+  await receiptRecord.save();
+  return receiptRecord;
+};
+
 // @desc    Create a new expense for an investment
 exports.createExpense = async (req, res) => {
   try {
@@ -435,6 +462,8 @@ exports.createExpense = async (req, res) => {
       status: payload.status,
       paymentMethod: payload.paymentMethod,
       recurringCategory: payload.recurringCategory,
+      costClass: payload.costClass,
+      costType: payload.costType,
       title: payload.title,
       description: payload.description,
       amount: payload.amount,
@@ -681,18 +710,58 @@ exports.updateExpense = async (req, res) => {
       Object.prototype.hasOwnProperty.call(req.body, 'budgetItem');
     const hasFundingSourceInput = Object.prototype.hasOwnProperty.call(req.body, 'fundingSourceId');
     const hasDrawRequestInput = Object.prototype.hasOwnProperty.call(req.body, 'drawRequestId');
+    const hasReceiptRecordInput =
+      Object.prototype.hasOwnProperty.call(req.body, 'projectReceiptId') ||
+      Object.prototype.hasOwnProperty.call(req.body, 'receiptRecordId');
     const requestedBudgetItemId = toOptionalString(req.body.budgetItemId || req.body.budgetItem);
+    const requestedReceiptRecordId = toOptionalString(
+      req.body.projectReceiptId || req.body.receiptRecordId
+    );
     const budgetItem = hasBudgetItemInput
       ? await getAuthorizedBudgetItem(requestedBudgetItemId, String(expense.investment), req.user.id)
       : expense.budgetItem
         ? await BudgetItem.findById(expense.budgetItem)
         : null;
+    const nextReceiptRecord = hasReceiptRecordInput
+      ? await getAuthorizedProjectReceipt(
+          requestedReceiptRecordId,
+          req.user.id,
+          String(expense.investment)
+        )
+      : null;
 
     if (hasBudgetItemInput && requestedBudgetItemId && !budgetItem) {
       return res.status(400).json({ msg: 'Selected scope item was not found for this project.' });
     }
 
-    const payload = buildExpensePayload({ body: req.body, budgetItem });
+    if (hasReceiptRecordInput && requestedReceiptRecordId && !nextReceiptRecord) {
+      return res.status(400).json({ msg: 'Selected receipt record was not found for this project.' });
+    }
+
+    if (
+      nextReceiptRecord?.expense &&
+      String(nextReceiptRecord.expense) !== String(expense._id)
+    ) {
+      return res.status(400).json({ msg: 'Selected receipt is already linked to another payment.' });
+    }
+
+    const mergedExpenseBody = {
+      ...expense.toObject(),
+      ...req.body,
+      title: req.body.title !== undefined ? req.body.title : expense.title,
+      description: req.body.description !== undefined ? req.body.description : expense.description,
+      recurringCategory:
+        req.body.recurringCategory !== undefined
+          ? req.body.recurringCategory
+          : expense.recurringCategory,
+      costClass: req.body.costClass !== undefined ? req.body.costClass : expense.costClass,
+      costType: req.body.costType !== undefined ? req.body.costType : expense.costType,
+      awardId: req.body.awardId !== undefined ? req.body.awardId : expense.awardId,
+      payeeName: req.body.payeeName !== undefined ? req.body.payeeName : expense.payeeName,
+      vendor: req.body.vendor !== undefined ? req.body.vendor : expense.vendor,
+    };
+
+    const payload = buildExpensePayload({ body: mergedExpenseBody, budgetItem });
     const financeLink =
       hasFundingSourceInput || hasDrawRequestInput
         ? resolveFinanceLink({
@@ -734,6 +803,18 @@ exports.updateExpense = async (req, res) => {
     if (req.body.recurringCategory !== undefined) {
       expense.recurringCategory = payload.recurringCategory;
     }
+    if (
+      req.body.costClass !== undefined ||
+      req.body.costType !== undefined ||
+      req.body.title !== undefined ||
+      req.body.description !== undefined ||
+      hasBudgetItemInput ||
+      req.body.awardId !== undefined ||
+      req.body.recurringCategory !== undefined
+    ) {
+      expense.costClass = payload.costClass;
+      expense.costType = payload.costType;
+    }
     if (req.body.receiptExtraction !== undefined) {
       expense.receiptExtraction = payload.receiptExtraction;
     }
@@ -747,20 +828,43 @@ exports.updateExpense = async (req, res) => {
       expense.drawRequestId = financeLink?.drawRequestId || '';
     }
 
+    const currentReceiptRecordId = toOptionalString(expense.receiptRecord);
+    const nextReceiptRecordId = nextReceiptRecord ? String(nextReceiptRecord._id) : '';
+
+    if (hasReceiptRecordInput) {
+      expense.receiptRecord = nextReceiptRecord?._id || null;
+      expense.receiptUrl = nextReceiptRecord?.receiptUrl || '';
+      expense.receiptCloudinaryId = nextReceiptRecord?.receiptCloudinaryId || '';
+    }
+
     if (!expense.vendor && !expense.payeeName) {
       return res.status(400).json({ msg: 'Choose a vendor or enter the payee name.' });
     }
 
     await expense.save();
 
-    if (expense.receiptRecord) {
-      const receiptRecord = await getAuthorizedProjectReceipt(
-        expense.receiptRecord,
+    if (hasReceiptRecordInput && currentReceiptRecordId && currentReceiptRecordId !== nextReceiptRecordId) {
+      const previousReceiptRecord = await getAuthorizedProjectReceipt(
+        currentReceiptRecordId,
         req.user.id,
         String(expense.investment)
       );
+      await releaseProjectReceipt(previousReceiptRecord);
+    }
+
+    const receiptRecordToSync = hasReceiptRecordInput
+      ? nextReceiptRecord
+      : expense.receiptRecord
+        ? await getAuthorizedProjectReceipt(
+            expense.receiptRecord,
+            req.user.id,
+            String(expense.investment)
+          )
+        : null;
+
+    if (receiptRecordToSync) {
       await syncProjectReceiptWithExpense({
-        receiptRecord,
+        receiptRecord: receiptRecordToSync,
         budgetItem: hasBudgetItemInput ? budgetItem : expense.budgetItem,
         payload: {
           title: expense.title,

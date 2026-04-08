@@ -1,4 +1,8 @@
 const mongoose = require('mongoose');
+const {
+  PAYMENT_COST_CLASS_VALUES,
+  PAYMENT_COST_TYPE_VALUES,
+} = require('../utils/paymentTaxonomy');
 
 const ExpenseSchema = new mongoose.Schema({
   user: {
@@ -53,6 +57,16 @@ const ExpenseSchema = new mongoose.Schema({
     type: String,
     enum: ['', 'taxes', 'insurance', 'utilities', 'other_monthly'],
     default: '',
+  },
+  costClass: {
+    type: String,
+    enum: PAYMENT_COST_CLASS_VALUES,
+    default: 'general',
+  },
+  costType: {
+    type: String,
+    enum: PAYMENT_COST_TYPE_VALUES,
+    default: 'misc',
   },
   title: {
     type: String,
