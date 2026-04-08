@@ -87,8 +87,8 @@ const BudgetItemSchema = new mongoose.Schema({
   },
   description: {
     type: String,
-    required: [true, 'Please provide a description of the work.'],
     trim: true,
+    default: '',
   },
   budgetedAmount: {
     type: Number,
