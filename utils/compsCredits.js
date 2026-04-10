@@ -99,21 +99,26 @@ const grantCompsCredits = async ({
   grantKey = null,
   metadata = null,
 }) => {
+  const grantPayload = {
+    user: userId,
+    sourceType,
+    totalCredits: credits,
+    remainingCredits: credits,
+    expiresAt,
+    cycleStart,
+    cycleEnd,
+    stripeCheckoutSessionId,
+    stripeSubscriptionId,
+    stripeInvoiceId,
+    metadata,
+  };
+
+  if (grantKey) {
+    grantPayload.grantKey = grantKey;
+  }
+
   try {
-    return await CompsCreditGrant.create({
-      user: userId,
-      sourceType,
-      totalCredits: credits,
-      remainingCredits: credits,
-      expiresAt,
-      cycleStart,
-      cycleEnd,
-      stripeCheckoutSessionId,
-      stripeSubscriptionId,
-      stripeInvoiceId,
-      grantKey,
-      metadata,
-    });
+    return await CompsCreditGrant.create(grantPayload);
   } catch (error) {
     if (error?.code === 11000 && grantKey) {
       return CompsCreditGrant.findOne({ grantKey });

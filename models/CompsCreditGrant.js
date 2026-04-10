@@ -56,7 +56,7 @@ const CompsCreditGrantSchema = new mongoose.Schema(
     },
     grantKey: {
       type: String,
-      default: null,
+      default: undefined,
       unique: true,
       sparse: true,
     },
